@@ -1,19 +1,13 @@
 import { requireSession } from "@/lib/auth/guards";
+import { KnowledgeClient } from "@/components/dashboard/knowledge-client";
 
 export default async function KnowledgePage() {
-  const session = await requireSession();
+  await requireSession();
 
   return (
-    <div className="space-y-8 p-8">
-      <div className="space-y-2">
-        <h1 className="text-3xl font-semibold">Knowledge Base</h1>
-        <p className="text-muted-foreground">
-          Upload and manage documents for your chatbot at {session.tenant?.clientName || "your workspace"}
-        </p>
-      </div>
-      <div className="rounded-lg border bg-card p-6 text-center text-muted-foreground">
-        <p>Upload documents to get started</p>
-      </div>
-    </div>
+    <main className="mx-auto max-w-7xl px-4 md:px-8 py-8">
+      <KnowledgeClient />
+    </main>
   );
 }
+
