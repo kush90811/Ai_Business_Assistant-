@@ -3,19 +3,17 @@
 import React, { useState } from "react";
 import { 
   Building, 
-  Sparkles, 
   Palette, 
   Save, 
   Check, 
   Bot, 
   User, 
   Sliders, 
-  MessageSquare, 
   ArrowRight,
   Globe,
   Mail
 } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";

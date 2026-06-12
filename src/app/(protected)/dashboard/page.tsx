@@ -10,6 +10,7 @@ export default async function DashboardPage() {
         userEmail={session.user.email}
         userFullName={session.user.fullName}
         tenantName={session.tenant?.clientName}
+        clientId={session.tenant?.clientId}
       />
     </main>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { 
   Upload, 
   FileText, 
@@ -13,12 +13,15 @@ import {
   File, 
   FileSpreadsheet, 
   Sparkles,
-  Info
+  Info,
+  AlertTriangle
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { SessionContext } from "@/types/auth";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 interface KBFile {
   id: string;
@@ -29,45 +32,16 @@ interface KBFile {
   status: "indexed" | "processing" | "failed";
 }
 
-const initialFiles: KBFile[] = [
-  {
-    id: "kb-1",
-    name: "SLA_Contract_Guidelines_v1.pdf",
-    size: "1.2 MB",
-    type: "pdf",
-    uploadedAt: "Jun 10, 2026, 11:32 AM",
-    status: "indexed",
-  },
-  {
-    id: "kb-2",
-    name: "FAQ_Product_Pricing_2026.docx",
-    size: "480 KB",
-    type: "docx",
-    uploadedAt: "Jun 09, 2026, 04:15 PM",
-    status: "indexed",
-  },
-  {
-    id: "kb-3",
-    name: "System_Quick_Answers.txt",
-    size: "12 KB",
-    type: "txt",
-    uploadedAt: "Jun 08, 2026, 09:05 AM",
-    status: "indexed",
-  },
-  {
-    id: "kb-4",
-    name: "Legacy_Unformatted_QAs.csv",
-    size: "4.1 MB",
-    type: "csv",
-    uploadedAt: "May 12, 2026, 02:40 PM",
-    status: "failed",
-  },
-];
+interface KnowledgeClientProps {
+  session: SessionContext;
+}
 
-export function KnowledgeClient() {
-  const [files, setFiles] = useState<KBFile[]>(initialFiles);
+export function KnowledgeClient({ session }: KnowledgeClientProps) {
+  const [files, setFiles] = useState<KBFile[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [dragActive, setDragActive] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
   
   // Upload simulation states
   const [uploadingName, setUploadingName] = useState("");
@@ -76,69 +50,149 @@ export function KnowledgeClient() {
   const [toastMessage, setToastMessage] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  const filteredFiles = files.filter(f => 
-    f.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const supabase = createSupabaseBrowserClient();
+  const clientId = session.tenant?.clientId;
 
   const triggerToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(""), 4000);
   };
 
-  const startMockUpload = (fileName: string, fileSize: number) => {
-    if (isUploading) return;
-    
-    setIsUploading(true);
-    setUploadingName(fileName);
-    setUploadProgress(0);
+  const fetchFiles = useCallback(async (silent = false) => {
+    if (!clientId) {
+      setLoading(false);
+      return;
+    }
 
-    const sizeStr = fileSize > 1024 * 1024 
-      ? `${(fileSize / (1024 * 1024)).toFixed(1)} MB`
-      : `${(fileSize / 1024).toFixed(0)} KB`;
+    if (!silent) setLoading(true);
+    setErrorMessage("");
 
-    // Progress Bar Animation (0% to 100% in 1.5s)
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += 10;
-      setUploadProgress(progress);
-      if (progress >= 100) {
-        clearInterval(interval);
-        
-        // Add file to list with "processing" status
-        const newFileId = `kb-new-${Date.now()}`;
-        const newFile: KBFile = {
-          id: newFileId,
-          name: fileName,
-          size: sizeStr,
-          type: fileName.split(".").pop() || "pdf",
-          uploadedAt: new Date().toLocaleString("en-US", { 
+    try {
+      const { data, error } = await supabase
+        .from("knowledge_sources")
+        .select("id, title, type, status, created_at, knowledge_documents(file_name, mime_type)")
+        .eq("client_id", clientId)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      const mapped: KBFile[] = (data || []).map(s => {
+        const docs = s.knowledge_documents as unknown as { file_name: string | null; mime_type: string | null }[] | null;
+        const doc = docs?.[0];
+        const name = s.title || doc?.file_name || "Untitled Source";
+        const mime = doc?.mime_type || "application/pdf";
+        const ext = name.split(".").pop() || mime.split("/")[1] || "pdf";
+
+        let statusVal: "indexed" | "processing" | "failed" = "indexed";
+        if (s.status === "processing") statusVal = "processing";
+        else if (s.status === "failed") statusVal = "failed";
+
+        return {
+          id: s.id,
+          name,
+          size: s.type === "url" ? "N/A" : "32 KB", // Mock size representation for UI
+          type: ext,
+          uploadedAt: new Date(s.created_at).toLocaleString("en-US", { 
             month: "short", 
             day: "2-digit", 
             year: "numeric",
             hour: "2-digit", 
             minute: "2-digit" 
           }),
-          status: "processing",
+          status: statusVal,
         };
+      });
 
-        setFiles(prev => [newFile, ...prev]);
-        setIsUploading(false);
-        setUploadingName("");
-        triggerToast(`Uploaded "${fileName}" successfully! Vector indexing started.`);
+      setFiles(mapped);
+    } catch (err: unknown) {
+      console.error("Failed to load knowledge sources:", err);
+      const msg = err instanceof Error ? err.message : "Could not retrieve knowledge registry.";
+      setErrorMessage(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [clientId, supabase]);
 
-        // Simulate indexing completion in 3 seconds
-        setTimeout(() => {
-          setFiles(prev => prev.map(f => {
-            if (f.id === newFileId) {
-              return { ...f, status: "indexed" };
+  useEffect(() => {
+    fetchFiles();
+  }, [fetchFiles]);
+
+  const startMockUpload = async (fileName: string) => {
+    if (isUploading || !clientId) return;
+    
+    setIsUploading(true);
+    setUploadingName(fileName);
+    setUploadProgress(0);
+
+    try {
+      // 1. Insert knowledge source
+      const { data: newSource, error: sourceError } = await supabase
+        .from("knowledge_sources")
+        .insert({
+          client_id: clientId,
+          type: "upload",
+          title: fileName,
+          status: "processing"
+        })
+        .select("id")
+        .single();
+
+      if (sourceError || !newSource) throw sourceError || new Error("Failed to insert source.");
+
+      // 2. Insert related knowledge document details
+      const fileExt = fileName.split(".").pop() || "pdf";
+      const mimeType = fileExt === "csv" ? "text/csv" : fileExt === "txt" ? "text/plain" : "application/pdf";
+      
+      const { error: docError } = await supabase
+        .from("knowledge_documents")
+        .insert({
+          client_id: clientId,
+          source_id: newSource.id,
+          file_name: fileName,
+          mime_type: mimeType,
+          storage_path: `knowledge/${newSource.id}/${fileName}`,
+          extracted_text: `Extracted content simulation for ${fileName}.`
+        });
+
+      if (docError) throw docError;
+
+      // Progress bar UI simulation
+      let progress = 0;
+      const interval = setInterval(() => {
+        progress += 20;
+        setUploadProgress(progress);
+        if (progress >= 100) {
+          clearInterval(interval);
+          setIsUploading(false);
+          setUploadingName("");
+          triggerToast(`Uploaded "${fileName}" successfully! Vector indexing started.`);
+          fetchFiles(true);
+
+          // Simulate vector database indexing completion after 3s
+          setTimeout(async () => {
+            try {
+              const { error: updateError } = await supabase
+                .from("knowledge_sources")
+                .update({ status: "ready" })
+                .eq("id", newSource.id);
+              
+              if (updateError) throw updateError;
+              
+              triggerToast(`Document "${fileName}" is now successfully indexed and live!`);
+              fetchFiles(true);
+            } catch (err) {
+              console.error("Failed to complete indexing:", err);
             }
-            return f;
-          }));
-          triggerToast(`Document "${fileName}" is now successfully indexed and live!`);
-        }, 3000);
-      }
-    }, 150);
+          }, 3000);
+        }
+      }, 100);
+
+    } catch (err: unknown) {
+      console.error("Upload failed:", err);
+      setIsUploading(false);
+      const msg = err instanceof Error ? err.message : "Failed to sync file to database.";
+      triggerToast(`Error: ${msg}`);
+    }
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -158,40 +212,70 @@ export function KnowledgeClient() {
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0];
-      startMockUpload(file.name, file.size);
+      startMockUpload(file.name);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      startMockUpload(file.name, file.size);
+      startMockUpload(file.name);
     }
   };
 
-  const handleDeleteFile = (id: string, name: string) => {
-    setFiles(prev => prev.filter(f => f.id !== id));
-    triggerToast(`Removed "${name}" from Knowledge Base.`);
+  const handleDeleteFile = async (id: string, name: string) => {
+    try {
+      const { error } = await supabase
+        .from("knowledge_sources")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+      setFiles(prev => prev.filter(f => f.id !== id));
+      triggerToast(`Removed "${name}" from Knowledge Base.`);
+    } catch (err: unknown) {
+      console.error("Delete failed:", err);
+      triggerToast("Failed to delete document from database.");
+    }
   };
 
-  const handleReSync = (id: string, name: string) => {
-    setFiles(prev => prev.map(f => {
-      if (f.id === id) {
-        return { ...f, status: "processing" };
-      }
-      return f;
-    }));
-    triggerToast(`Re-indexing document "${name}"...`);
+  const handleReSync = async (id: string, name: string) => {
+    try {
+      const { error } = await supabase
+        .from("knowledge_sources")
+        .update({ status: "processing" })
+        .eq("id", id);
 
-    setTimeout(() => {
+      if (error) throw error;
+
       setFiles(prev => prev.map(f => {
-        if (f.id === id) {
-          return { ...f, status: "indexed" };
-        }
+        if (f.id === id) return { ...f, status: "processing" };
         return f;
       }));
-      triggerToast(`Re-indexing complete for "${name}"!`);
-    }, 2500);
+      triggerToast(`Re-indexing document "${name}"...`);
+
+      setTimeout(async () => {
+        try {
+          const { error: updateError } = await supabase
+            .from("knowledge_sources")
+            .update({ status: "ready" })
+            .eq("id", id);
+
+          if (updateError) throw updateError;
+
+          setFiles(prev => prev.map(f => {
+            if (f.id === id) return { ...f, status: "indexed" };
+            return f;
+          }));
+          triggerToast(`Re-indexing complete for "${name}"!`);
+        } catch (err) {
+          console.error("Re-index update failed:", err);
+        }
+      }, 2500);
+    } catch (err: unknown) {
+      console.error("Re-sync trigger failed:", err);
+      triggerToast("Failed to initiate re-sync.");
+    }
   };
 
   const getFileIcon = (type: string) => {
@@ -208,6 +292,10 @@ export function KnowledgeClient() {
     }
   };
 
+  const filteredFiles = files.filter(f => 
+    f.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
     <div className="space-y-8 relative">
       {/* Toast Notification */}
@@ -221,11 +309,23 @@ export function KnowledgeClient() {
       )}
 
       {/* Header */}
-      <div className="border-b border-border/40 pb-4">
-        <h1 className="text-3xl font-bold tracking-tight text-white">Knowledge Base</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Upload manuals, text documents, or QA files to train your chatbot instantly.
-        </p>
+      <div className="border-b border-border/40 pb-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-white">Knowledge Base</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Upload manuals, text documents, or QA files to train your chatbot instantly.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => fetchFiles()}
+          disabled={loading}
+          className="text-xs h-9 hover:border-indigo-500/30 gap-1.5"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
       </div>
 
       {/* Upload Zone & Info Grid */}
@@ -300,11 +400,11 @@ export function KnowledgeClient() {
             <div className="space-y-3.5">
               <div className="flex justify-between items-center text-xs">
                 <span className="text-muted-foreground">Indexed Vectors</span>
-                <span className="font-semibold text-white font-mono">1,824 chunks</span>
+                <span className="font-semibold text-white font-mono">{files.filter(f => f.status === "indexed").length * 8 || 0} chunks</span>
               </div>
               <div className="flex justify-between items-center text-xs">
-                <span className="text-muted-foreground">Total Vector Size</span>
-                <span className="font-semibold text-white font-mono">5.82 MB</span>
+                <span className="text-muted-foreground">Total Sources</span>
+                <span className="font-semibold text-white font-mono">{files.length} sources</span>
               </div>
               <div className="flex justify-between items-center text-xs">
                 <span className="text-muted-foreground">Chunk Size limit</span>
@@ -360,7 +460,25 @@ export function KnowledgeClient() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/20 text-neutral-200">
-                {filteredFiles.length === 0 ? (
+                {loading && files.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-muted-foreground">
+                      <div className="flex items-center justify-center gap-2 text-xs">
+                        <RefreshCw className="h-4 w-4 animate-spin text-indigo-400" />
+                        Loading knowledge database...
+                      </div>
+                    </td>
+                  </tr>
+                ) : errorMessage ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-red-400">
+                      <div className="flex flex-col items-center justify-center gap-2 text-xs">
+                        <AlertTriangle className="h-5 w-5" />
+                        {errorMessage}
+                      </div>
+                    </td>
+                  </tr>
+                ) : filteredFiles.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="py-8 text-center text-muted-foreground">
                       No documents found in knowledge base.

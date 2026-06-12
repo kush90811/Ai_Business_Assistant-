@@ -13,7 +13,7 @@ const compat = new FlatCompat({
 const eslintConfig = [...compat.extends("next/core-web-vitals", "next/typescript")];
 
 eslintConfig.unshift({
-	ignores: [".next/**", "node_modules/**", "supabase/.temp/**"],
+	ignores: [".next/**", "node_modules/**", "supabase/.temp/**", "next-env.d.ts"],
 });
 
 export default eslintConfig;

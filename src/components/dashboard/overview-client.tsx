@@ -1,151 +1,288 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Activity, 
   MessageSquare, 
   Users, 
-  ArrowUpRight, 
-  ArrowDownRight, 
   Sparkles, 
   Clock, 
   FileText, 
   UserPlus, 
-  TrendingUp, 
-  ArrowRight,
-  TrendingDown
+  ArrowRight
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 interface OverviewClientProps {
   userEmail: string;
   userFullName?: string;
   tenantName?: string;
+  clientId?: string;
 }
-
-// Mock chart data for last 7 days
-const chartData = {
-  sessions: [240, 310, 280, 420, 390, 480, 560],
-  leads: [18, 25, 22, 45, 38, 52, 64],
-  labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-};
-
-const recentConversations = [
-  {
-    id: "conv-1",
-    visitor: "Visitor #8912 (USA)",
-    lastMessage: "Is there a custom SLA for enterprise agreements?",
-    time: "4 mins ago",
-    sentiment: "positive" as const,
-    status: "open" as const,
-  },
-  {
-    id: "conv-2",
-    visitor: "Sarah Jenkins (Acme Corp)",
-    lastMessage: "I'd like to book a sales demo for 50 seats.",
-    time: "15 mins ago",
-    sentiment: "positive" as const,
-    status: "resolved" as const,
-  },
-  {
-    id: "conv-3",
-    visitor: "Visitor #4019 (UK)",
-    lastMessage: "Do you offer refunds for monthly subscriptions?",
-    time: "1 hour ago",
-    sentiment: "neutral" as const,
-    status: "open" as const,
-  },
-  {
-    id: "conv-4",
-    visitor: "Marcus Vance",
-    lastMessage: "Widget keeps throwing load error on my staging site.",
-    time: "3 hours ago",
-    sentiment: "negative" as const,
-    status: "open" as const,
-  },
-];
-
-const recentLeads = [
-  {
-    id: "lead-1",
-    name: "Sarah Jenkins",
-    email: "sarah@acme.co",
-    company: "Acme Corp",
-    source: "/pricing",
-    score: 94,
-    status: "qualified" as const,
-  },
-  {
-    id: "lead-2",
-    name: "Michael Chen",
-    email: "m.chen@techcorp.io",
-    company: "TechCorp Ltd",
-    source: "/features/ai-widget",
-    score: 81,
-    status: "contacted" as const,
-  },
-  {
-    id: "lead-3",
-    name: "Emma Watson",
-    email: "emma@design.co",
-    company: "DesignCo",
-    source: "/blog/customer-retention",
-    score: 68,
-    status: "new" as const,
-  },
-];
 
 const activities = [
   {
     id: "act-1",
     type: "lead",
-    title: "Lead Sarah Jenkins qualified",
-    description: "Lead score evaluated to 94/100 based on billing answers.",
-    time: "4 mins ago",
+    title: "Lead qualified automatically",
+    description: "Lead score updated based on contact details.",
+    time: "Just now",
     icon: UserPlus,
     color: "text-emerald-400 bg-emerald-500/10",
   },
   {
     id: "act-2",
     type: "chat",
-    title: "AI automated FAQ resolution",
-    description: "Resolved 'Pricing refund policy' query for Visitor #4019.",
-    time: "12 mins ago",
+    title: "AI Chat completion ready",
+    description: "Groq Llama 3.3 model processed customer inquiries.",
+    time: "Active",
     icon: Sparkles,
     color: "text-indigo-400 bg-indigo-500/10",
   },
   {
     id: "act-3",
     type: "knowledge",
-    title: "Knowledge file indexed",
-    description: "Document 'FAQ_Sales_v2.pdf' successfully processed.",
-    time: "1 hour ago",
+    title: "Knowledge Source sync",
+    description: "Document embeddings initialized in vector space.",
+    time: "Synced",
     icon: FileText,
     color: "text-amber-400 bg-amber-500/10",
   },
   {
     id: "act-4",
     type: "system",
-    title: "Widget color customized",
-    description: "Theme color updated to Hex #6366F1 by Admin.",
-    time: "4 hours ago",
+    title: "Database Syncing",
+    description: "Supabase real-time client connected successfully.",
+    time: "Online",
     icon: Activity,
     color: "text-sky-400 bg-sky-500/10",
   },
 ];
 
-export function OverviewClient({ userEmail, userFullName, tenantName }: OverviewClientProps) {
+interface RecentConv {
+  id: string;
+  visitor: string;
+  lastMessage: string;
+  time: string;
+  sentiment: "positive" | "neutral" | "negative";
+  status: "open" | "resolved";
+}
+
+interface RecentLead {
+  id: string;
+  name: string;
+  email: string;
+  company: string;
+  source: string;
+  score: number;
+  status: "new" | "contacted" | "qualified";
+}
+
+export function OverviewClient({ userEmail, userFullName, tenantName, clientId }: OverviewClientProps) {
   const [activeMetric, setActiveMetric] = useState<"sessions" | "leads">("sessions");
+  const [stats, setStats] = useState({
+    sessions: 0,
+    messages: 0,
+    leads: 0,
+    sources: 0,
+  });
+  const [recentConvs, setRecentConvs] = useState<RecentConv[]>([]);
+  const [recentLeadsList, setRecentLeadsList] = useState<RecentLead[]>([]);
+  const [chartSessions, setChartSessions] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
+  const [chartLeads, setChartLeads] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
+  const [chartLabels, setChartLabels] = useState<string[]>(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!clientId) {
+      setLoading(false);
+      return;
+    }
+
+    const fetchDashboardData = async () => {
+      setLoading(true);
+      const supabase = createSupabaseBrowserClient();
+
+      try {
+        // 1. Fetch Total Counts
+        const [
+          { count: sessionsCount },
+          { count: messagesCount },
+          { count: leadsCount },
+          { count: sourcesCount }
+        ] = await Promise.all([
+          supabase.from("chat_sessions").select("*", { count: "exact", head: true }).eq("client_id", clientId),
+          supabase.from("chat_messages").select("*", { count: "exact", head: true }).eq("client_id", clientId),
+          supabase.from("leads").select("*", { count: "exact", head: true }).eq("client_id", clientId),
+          supabase.from("knowledge_sources").select("*", { count: "exact", head: true }).eq("client_id", clientId)
+        ]);
+
+        setStats({
+          sessions: sessionsCount || 0,
+          messages: messagesCount || 0,
+          leads: leadsCount || 0,
+          sources: sourcesCount || 0,
+        });
+
+        // 2. Fetch Recent Conversations
+        const { data: recentSessions } = await supabase
+          .from("chat_sessions")
+          .select("id, visitor_id, status, last_activity_at, started_at")
+          .eq("client_id", clientId)
+          .order("last_activity_at", { ascending: false })
+          .limit(4);
+
+        if (recentSessions && recentSessions.length > 0) {
+          const sessionIds = recentSessions.map(s => s.id);
+          const [
+            { data: recentMessages },
+            { data: sessionLeads }
+          ] = await Promise.all([
+            supabase
+              .from("chat_messages")
+              .select("session_id, content")
+              .in("session_id", sessionIds)
+              .order("created_at", { ascending: false }),
+            supabase
+              .from("leads")
+              .select("session_id, name")
+              .in("session_id", sessionIds)
+          ]);
+
+          const leadsMap = new Map();
+          sessionLeads?.forEach(l => {
+            if (l.session_id) leadsMap.set(l.session_id, l.name);
+          });
+
+          const mappedConvs = recentSessions.map(s => {
+            const lastMsg = recentMessages?.find(m => m.session_id === s.id)?.content || "No messages yet";
+            const visitorName = leadsMap.get(s.id) || s.visitor_id || `Visitor #${s.id.slice(0, 4).toUpperCase()}`;
+
+            let sentiment: "positive" | "neutral" | "negative" = "neutral";
+            const lowerMsg = lastMsg.toLowerCase();
+            if (lowerMsg.includes("great") || lowerMsg.includes("thank") || lowerMsg.includes("yes") || lowerMsg.includes("pricing") || lowerMsg.includes("demo")) {
+              sentiment = "positive";
+            } else if (lowerMsg.includes("error") || lowerMsg.includes("fail") || lowerMsg.includes("broke") || lowerMsg.includes("bad")) {
+              sentiment = "negative";
+            }
+
+            const timeDiff = Date.now() - new Date(s.last_activity_at || s.started_at).getTime();
+            const mins = Math.floor(timeDiff / 60000);
+            let timeStr = "Just now";
+            if (mins >= 1 && mins < 60) timeStr = `${mins}m ago`;
+            else if (mins >= 60 && mins < 1440) timeStr = `${Math.floor(mins / 60)}h ago`;
+            else if (mins >= 1440) timeStr = new Date(s.last_activity_at || s.started_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+            return {
+              id: s.id,
+              visitor: visitorName,
+              lastMessage: lastMsg,
+              time: timeStr,
+              sentiment,
+              status: s.status as "open" | "resolved",
+            };
+          });
+          setRecentConvs(mappedConvs);
+        } else {
+          setRecentConvs([]);
+        }
+
+        // 3. Fetch Recent Leads
+        const { data: recentLeads } = await supabase
+          .from("leads")
+          .select("id, name, email, phone, source, status, created_at, metadata")
+          .eq("client_id", clientId)
+          .order("created_at", { ascending: false })
+          .limit(3);
+
+        if (recentLeads) {
+          const mappedLeads = recentLeads.map(l => {
+            let score = 30;
+            if (l.email) score += 40;
+            if (l.phone) score += 20;
+            if (l.name && l.name !== "Anonymous") score += 10;
+            if (l.status === "qualified") score += 10;
+            return {
+              id: l.id,
+              name: l.name || "Anonymous",
+              email: l.email || "",
+              company: l.metadata?.company || "Not specified",
+              source: l.source || "chatbot",
+              score,
+              status: l.status as "new" | "contacted" | "qualified",
+            };
+          });
+          setRecentLeadsList(mappedLeads);
+        } else {
+          setRecentLeadsList([]);
+        }
+
+        // 4. Generate 7-day Analytics
+        const labels = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          labels.push(d.toLocaleDateString("en-US", { weekday: "short" }));
+        }
+
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        sevenDaysAgo.setHours(0, 0, 0, 0);
+
+        const [
+          { data: sessions7d },
+          { data: leads7d }
+        ] = await Promise.all([
+          supabase.from("chat_sessions").select("started_at").eq("client_id", clientId).gte("started_at", sevenDaysAgo.toISOString()),
+          supabase.from("leads").select("created_at").eq("client_id", clientId).gte("created_at", sevenDaysAgo.toISOString())
+        ]);
+
+        const dailySessions = Array(7).fill(0);
+        const dailyLeads = Array(7).fill(0);
+
+        for (let i = 0; i < 7; i++) {
+          const targetDate = new Date();
+          targetDate.setDate(targetDate.getDate() - (6 - i));
+          const targetDateString = targetDate.toDateString();
+
+          sessions7d?.forEach(s => {
+            if (new Date(s.started_at).toDateString() === targetDateString) {
+              dailySessions[i]++;
+            }
+          });
+
+          leads7d?.forEach(l => {
+            if (new Date(l.created_at).toDateString() === targetDateString) {
+              dailyLeads[i]++;
+            }
+          });
+        }
+
+        setChartSessions(dailySessions);
+        setChartLeads(dailyLeads);
+        setChartLabels(labels);
+
+      } catch (err) {
+        console.error("Error fetching dashboard data:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [clientId]);
 
   // SVG Chart Dimensions & Computations
   const chartHeight = 160;
   const chartWidth = 500;
   const padding = 20;
 
-  const currentPoints = activeMetric === "sessions" ? chartData.sessions : chartData.leads;
-  const maxVal = Math.max(...currentPoints) * 1.15;
+  const currentPoints = activeMetric === "sessions" ? chartSessions : chartLeads;
+  const maxVal = Math.max(...currentPoints, 5) * 1.15;
   const minVal = 0;
 
   const points = currentPoints.map((val, idx) => {
@@ -184,11 +321,11 @@ export function OverviewClient({ userEmail, userFullName, tenantName }: Overview
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-white tracking-tight">1,482</div>
-            <div className="flex items-center gap-1 mt-1 text-xs text-emerald-400">
-              <TrendingUp className="h-3.5 w-3.5" />
-              <span>+12.4%</span>
-              <span className="text-muted-foreground ml-1">vs last week</span>
+            <div className="text-2xl font-bold text-white tracking-tight">
+              {loading ? "..." : stats.sessions}
+            </div>
+            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+              <span>All registered chats</span>
             </div>
           </CardContent>
         </Card>
@@ -202,11 +339,11 @@ export function OverviewClient({ userEmail, userFullName, tenantName }: Overview
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-white tracking-tight">18,924</div>
-            <div className="flex items-center gap-1 mt-1 text-xs text-emerald-400">
-              <TrendingUp className="h-3.5 w-3.5" />
-              <span>+8.1%</span>
-              <span className="text-muted-foreground ml-1">vs last week</span>
+            <div className="text-2xl font-bold text-white tracking-tight">
+              {loading ? "..." : stats.messages}
+            </div>
+            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+              <span>Interactive dialogue nodes</span>
             </div>
           </CardContent>
         </Card>
@@ -220,11 +357,11 @@ export function OverviewClient({ userEmail, userFullName, tenantName }: Overview
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-white tracking-tight">342</div>
-            <div className="flex items-center gap-1 mt-1 text-xs text-emerald-400">
-              <TrendingUp className="h-3.5 w-3.5" />
-              <span>+18.3%</span>
-              <span className="text-muted-foreground ml-1">vs last week</span>
+            <div className="text-2xl font-bold text-white tracking-tight">
+              {loading ? "..." : stats.leads}
+            </div>
+            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+              <span>Qualified customer contacts</span>
             </div>
           </CardContent>
         </Card>
@@ -232,17 +369,17 @@ export function OverviewClient({ userEmail, userFullName, tenantName }: Overview
         {/* Stat Card 4 */}
         <Card className="hover:border-indigo-500/30 group">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-white transition-colors">AI Resolution Rate</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-white transition-colors">Knowledge Sources</CardTitle>
             <div className="p-2 bg-pink-500/10 rounded-lg text-pink-400">
-              <Sparkles className="h-4 w-4" />
+              <FileText className="h-4 w-4" />
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-white tracking-tight">94.2%</div>
-            <div className="flex items-center gap-1 mt-1 text-xs text-emerald-400">
-              <TrendingUp className="h-3.5 w-3.5" />
-              <span>+2.1%</span>
-              <span className="text-muted-foreground ml-1">vs last week</span>
+            <div className="text-2xl font-bold text-white tracking-tight">
+              {loading ? "..." : stats.sources}
+            </div>
+            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+              <span>Indexed files & links</span>
             </div>
           </CardContent>
         </Card>
@@ -316,7 +453,7 @@ export function OverviewClient({ userEmail, userFullName, tenantName }: Overview
 
             {/* Labels */}
             <div className="flex justify-between text-[11px] font-medium text-muted-foreground px-5 border-t border-border/10 pt-2">
-              {chartData.labels.map((label, idx) => (
+              {chartLabels.map((label, idx) => (
                 <span key={idx}>{label}</span>
               ))}
             </div>
@@ -369,9 +506,11 @@ export function OverviewClient({ userEmail, userFullName, tenantName }: Overview
                 <CardTitle className="text-md font-semibold">Recent Conversations</CardTitle>
                 <CardDescription>Live active visitor queries</CardDescription>
               </div>
-              <Button variant="outline" size="sm" className="text-xs hover:border-indigo-500/30 gap-1.5" asChild={false}>
-                <span>View Inbox</span>
-                <ArrowRight className="h-3 w-3" />
+              <Button variant="outline" size="sm" className="text-xs hover:border-indigo-500/30 gap-1.5" asChild>
+                <Link href="/dashboard/chats">
+                  <span>View Inbox</span>
+                  <ArrowRight className="h-3 w-3 inline ml-1" />
+                </Link>
               </Button>
             </CardHeader>
             <CardContent className="pt-0">
@@ -386,28 +525,36 @@ export function OverviewClient({ userEmail, userFullName, tenantName }: Overview
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/20">
-                    {recentConversations.map((conv) => (
-                      <tr key={conv.id} className="hover:bg-white/5 transition-colors group">
-                        <td className="py-3 font-semibold text-white flex items-center gap-1.5">
-                          <span className={`h-1.5 w-1.5 rounded-full ${conv.status === "open" ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground"}`} />
-                          {conv.visitor}
-                        </td>
-                        <td className="py-3 text-muted-foreground truncate max-w-[160px]">{conv.lastMessage}</td>
-                        <td className="py-3">
-                          <Badge variant={conv.status === "open" ? "info" : "secondary"} className="text-[9px] uppercase tracking-wider px-1.5 py-0">
-                            {conv.status}
-                          </Badge>
-                        </td>
-                        <td className="py-3 text-right">
-                          <Badge 
-                            variant={conv.sentiment === "positive" ? "success" : conv.sentiment === "negative" ? "destructive" : "outline"} 
-                            className="text-[9px] capitalize px-1.5 py-0"
-                          >
-                            {conv.sentiment}
-                          </Badge>
+                    {recentConvs.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="py-6 text-center text-muted-foreground text-xs">
+                          No active conversations recorded yet.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      recentConvs.map((conv) => (
+                        <tr key={conv.id} className="hover:bg-white/5 transition-colors group">
+                          <td className="py-3 font-semibold text-white flex items-center gap-1.5">
+                            <span className={`h-1.5 w-1.5 rounded-full ${conv.status === "open" ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground"}`} />
+                            {conv.visitor}
+                          </td>
+                          <td className="py-3 text-muted-foreground truncate max-w-[160px]">{conv.lastMessage}</td>
+                          <td className="py-3">
+                            <Badge variant={conv.status === "open" ? "info" : "secondary"} className="text-[9px] uppercase tracking-wider px-1.5 py-0 font-bold">
+                              {conv.status}
+                            </Badge>
+                          </td>
+                          <td className="py-3 text-right">
+                            <Badge 
+                              variant={conv.sentiment === "positive" ? "success" : conv.sentiment === "negative" ? "destructive" : "outline"} 
+                              className="text-[9px] capitalize px-1.5 py-0 font-bold"
+                            >
+                              {conv.sentiment}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -423,9 +570,11 @@ export function OverviewClient({ userEmail, userFullName, tenantName }: Overview
                 <CardTitle className="text-md font-semibold">Leads Pipeline</CardTitle>
                 <CardDescription>Latest contact details captured</CardDescription>
               </div>
-              <Button variant="outline" size="sm" className="text-xs hover:border-indigo-500/30 gap-1.5" asChild={false}>
-                <span>View Leads</span>
-                <ArrowRight className="h-3 w-3" />
+              <Button variant="outline" size="sm" className="text-xs hover:border-indigo-500/30 gap-1.5" asChild>
+                <Link href="/dashboard/leads">
+                  <span>View Leads</span>
+                  <ArrowRight className="h-3 w-3 inline ml-1" />
+                </Link>
               </Button>
             </CardHeader>
             <CardContent className="pt-0">
@@ -440,27 +589,35 @@ export function OverviewClient({ userEmail, userFullName, tenantName }: Overview
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/20">
-                    {recentLeads.map((lead) => (
-                      <tr key={lead.id} className="hover:bg-white/5 transition-colors">
-                        <td className="py-3 font-semibold text-white">
-                          <div className="flex flex-col">
-                            <span>{lead.name}</span>
-                            <span className="text-[10px] text-muted-foreground font-normal">{lead.email}</span>
-                          </div>
-                        </td>
-                        <td className="py-3 text-muted-foreground">{lead.company}</td>
-                        <td className="py-3">
-                          <span className="font-mono text-[10px] bg-white/5 border border-white/5 rounded px-1.5 py-0.5 text-neutral-300">
-                            {lead.source}
-                          </span>
-                        </td>
-                        <td className="py-3 text-right">
-                          <Badge variant={lead.score >= 80 ? "success" : "warning"} className="text-[9px] px-1.5 py-0 font-mono">
-                            {lead.score}/100
-                          </Badge>
+                    {recentLeadsList.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="py-6 text-center text-muted-foreground text-xs">
+                          No leads captured yet.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      recentLeadsList.map((lead) => (
+                        <tr key={lead.id} className="hover:bg-white/5 transition-colors">
+                          <td className="py-3 font-semibold text-white">
+                            <div className="flex flex-col">
+                              <span>{lead.name}</span>
+                              <span className="text-[10px] text-muted-foreground font-normal">{lead.email}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 text-muted-foreground">{lead.company}</td>
+                          <td className="py-3">
+                            <span className="font-mono text-[10px] bg-white/5 border border-white/5 rounded px-1.5 py-0.5 text-neutral-300">
+                              {lead.source}
+                            </span>
+                          </td>
+                          <td className="py-3 text-right">
+                            <Badge variant={lead.score >= 80 ? "success" : "warning"} className="text-[9px] px-1.5 py-0 font-mono font-bold">
+                              {lead.score}/100
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
