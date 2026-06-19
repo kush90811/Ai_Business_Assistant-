@@ -38,12 +38,13 @@ interface KnowledgeClientProps {
 
 export function KnowledgeClient({ session }: KnowledgeClientProps) {
   const [files, setFiles] = useState<KBFile[]>([]);
+  const [totalChunks, setTotalChunks] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   
-  // Upload simulation states
+  // Upload and progress states
   const [uploadingName, setUploadingName] = useState("");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
@@ -68,31 +69,41 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
     setErrorMessage("");
 
     try {
+      // 1. Fetch document registry
       const { data, error } = await supabase
-        .from("knowledge_sources")
-        .select("id, title, type, status, created_at, knowledge_documents(file_name, mime_type)")
-        .eq("client_id", clientId)
+        .from("knowledge_documents")
+        .select("id, file_name, file_type, file_size, storage_path, status, created_at")
+        .eq("workspace_id", clientId)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
 
-      const mapped: KBFile[] = (data || []).map(s => {
-        const docs = s.knowledge_documents as unknown as { file_name: string | null; mime_type: string | null }[] | null;
-        const doc = docs?.[0];
-        const name = s.title || doc?.file_name || "Untitled Source";
-        const mime = doc?.mime_type || "application/pdf";
-        const ext = name.split(".").pop() || mime.split("/")[1] || "pdf";
+      // 2. Fetch total chunk count
+      const { count: chunksCount, error: chunksError } = await supabase
+        .from("knowledge_chunks")
+        .select("*", { count: "exact", head: true })
+        .eq("workspace_id", clientId);
 
+      if (chunksError) {
+        console.error("Failed to load chunks count:", chunksError);
+      } else {
+        setTotalChunks(chunksCount || 0);
+      }
+
+      const mapped: KBFile[] = (data || []).map(doc => {
         let statusVal: "indexed" | "processing" | "failed" = "indexed";
-        if (s.status === "processing") statusVal = "processing";
-        else if (s.status === "failed") statusVal = "failed";
+        if (doc.status === "processing" || doc.status === "uploading") {
+          statusVal = "processing";
+        } else if (doc.status === "failed") {
+          statusVal = "failed";
+        }
 
         return {
-          id: s.id,
-          name,
-          size: s.type === "url" ? "N/A" : "32 KB", // Mock size representation for UI
-          type: ext,
-          uploadedAt: new Date(s.created_at).toLocaleString("en-US", { 
+          id: doc.id,
+          name: doc.file_name || "Untitled Document",
+          size: doc.file_size || "N/A",
+          type: doc.file_type || "txt",
+          uploadedAt: new Date(doc.created_at).toLocaleString("en-US", { 
             month: "short", 
             day: "2-digit", 
             year: "numeric",
@@ -105,7 +116,7 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
 
       setFiles(mapped);
     } catch (err: unknown) {
-      console.error("Failed to load knowledge sources:", err);
+      console.error("Failed to load knowledge documents:", err);
       const msg = err instanceof Error ? err.message : "Could not retrieve knowledge registry.";
       setErrorMessage(msg);
     } finally {
@@ -117,81 +128,111 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
     fetchFiles();
   }, [fetchFiles]);
 
-  const startMockUpload = async (fileName: string) => {
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+  };
+
+  const startRealUpload = async (file: File) => {
     if (isUploading || !clientId) return;
+
+    // Validate extension
+    const allowedExtensions = ["pdf", "docx", "txt", "csv"];
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    if (!allowedExtensions.includes(ext)) {
+      triggerToast("Error: Unsupported file type. Please upload PDF, DOCX, TXT, or CSV.");
+      return;
+    }
+
+    // Validate size (10MB limit)
+    if (file.size > 10 * 1024 * 1024) {
+      triggerToast("Error: File exceeds 10MB limit.");
+      return;
+    }
     
     setIsUploading(true);
-    setUploadingName(fileName);
-    setUploadProgress(0);
+    setUploadingName(file.name);
+    setUploadProgress(10);
+    setErrorMessage("");
 
     try {
-      // 1. Insert knowledge source
-      const { data: newSource, error: sourceError } = await supabase
-        .from("knowledge_sources")
-        .insert({
-          client_id: clientId,
-          type: "upload",
-          title: fileName,
-          status: "processing"
-        })
-        .select("id")
-        .single();
+      const documentId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
+      const storagePath = `${clientId}/${documentId}_${file.name}`;
+      const fileSizeStr = formatFileSize(file.size);
 
-      if (sourceError || !newSource) throw sourceError || new Error("Failed to insert source.");
-
-      // 2. Insert related knowledge document details
-      const fileExt = fileName.split(".").pop() || "pdf";
-      const mimeType = fileExt === "csv" ? "text/csv" : fileExt === "txt" ? "text/plain" : "application/pdf";
-      
-      const { error: docError } = await supabase
+      // 1. Insert record into database in "uploading" status
+      const { error: insertError } = await supabase
         .from("knowledge_documents")
         .insert({
-          client_id: clientId,
-          source_id: newSource.id,
-          file_name: fileName,
-          mime_type: mimeType,
-          storage_path: `knowledge/${newSource.id}/${fileName}`,
-          extracted_text: `Extracted content simulation for ${fileName}.`
+          id: documentId,
+          workspace_id: clientId,
+          file_name: file.name,
+          file_type: ext,
+          file_size: fileSizeStr,
+          storage_path: storagePath,
+          status: "uploading"
         });
 
-      if (docError) throw docError;
+      if (insertError) throw new Error(`Database error: ${insertError.message}`);
+      
+      setUploadProgress(40);
 
-      // Progress bar UI simulation
-      let progress = 0;
-      const interval = setInterval(() => {
-        progress += 20;
-        setUploadProgress(progress);
-        if (progress >= 100) {
-          clearInterval(interval);
-          setIsUploading(false);
-          setUploadingName("");
-          triggerToast(`Uploaded "${fileName}" successfully! Vector indexing started.`);
-          fetchFiles(true);
+      // 2. Upload file to Supabase storage bucket 'knowledge-files'
+      const { error: uploadError } = await supabase.storage
+        .from("knowledge-files")
+        .upload(storagePath, file, {
+          cacheControl: "3600",
+          upsert: true
+        });
 
-          // Simulate vector database indexing completion after 3s
-          setTimeout(async () => {
-            try {
-              const { error: updateError } = await supabase
-                .from("knowledge_sources")
-                .update({ status: "ready" })
-                .eq("id", newSource.id);
-              
-              if (updateError) throw updateError;
-              
-              triggerToast(`Document "${fileName}" is now successfully indexed and live!`);
-              fetchFiles(true);
-            } catch (err) {
-              console.error("Failed to complete indexing:", err);
-            }
-          }, 3000);
-        }
-      }, 100);
+      if (uploadError) {
+        // Update database record to failed
+        await supabase
+          .from("knowledge_documents")
+          .update({ status: "failed" })
+          .eq("id", documentId);
+        throw new Error(`Storage upload error: ${uploadError.message}`);
+      }
 
-    } catch (err: unknown) {
-      console.error("Upload failed:", err);
+      setUploadProgress(70);
+
+      // Update status to processing
+      await supabase
+        .from("knowledge_documents")
+        .update({ status: "processing" })
+        .eq("id", documentId);
+      
+      fetchFiles(true);
+      setUploadProgress(90);
+
+      // 3. Call backend parsing & embeddings endpoint
+      const response = await fetch("/api/knowledge/process", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ documentId }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to process and index document.");
+      }
+
+      setUploadProgress(100);
+      triggerToast(`Uploaded and indexed "${file.name}" successfully!`);
+      
+    } catch (err: any) {
+      console.error("Upload/Processing failed:", err);
+      triggerToast(`Error: ${err.message || "Failed to process file."}`);
+    } finally {
       setIsUploading(false);
-      const msg = err instanceof Error ? err.message : "Failed to sync file to database.";
-      triggerToast(`Error: ${msg}`);
+      setUploadingName("");
+      setUploadProgress(0);
+      fetchFiles(true);
     }
   };
 
@@ -212,27 +253,50 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0];
-      startMockUpload(file.name);
+      startRealUpload(file);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      startMockUpload(file.name);
+      startRealUpload(file);
     }
   };
 
   const handleDeleteFile = async (id: string, name: string) => {
     try {
-      const { error } = await supabase
-        .from("knowledge_sources")
+      // 1. Fetch document storage path
+      const { data: document, error: docError } = await supabase
+        .from("knowledge_documents")
+        .select("storage_path")
+        .eq("id", id)
+        .single();
+
+      if (docError) throw docError;
+
+      // 2. Remove file from Supabase Storage
+      if (document?.storage_path) {
+        const { error: storageError } = await supabase.storage
+          .from("knowledge-files")
+          .remove([document.storage_path]);
+        
+        if (storageError) {
+          console.warn("Storage deletion warning/error:", storageError.message);
+        }
+      }
+
+      // 3. Delete DB record (cascading deletes chunks)
+      const { error: deleteError } = await supabase
+        .from("knowledge_documents")
         .delete()
         .eq("id", id);
 
-      if (error) throw error;
+      if (deleteError) throw deleteError;
+
       setFiles(prev => prev.filter(f => f.id !== id));
       triggerToast(`Removed "${name}" from Knowledge Base.`);
+      fetchFiles(true);
     } catch (err: unknown) {
       console.error("Delete failed:", err);
       triggerToast("Failed to delete document from database.");
@@ -241,40 +305,41 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
 
   const handleReSync = async (id: string, name: string) => {
     try {
-      const { error } = await supabase
-        .from("knowledge_sources")
+      // Set status to processing
+      const { error: updateError } = await supabase
+        .from("knowledge_documents")
         .update({ status: "processing" })
         .eq("id", id);
 
-      if (error) throw error;
+      if (updateError) throw updateError;
 
       setFiles(prev => prev.map(f => {
         if (f.id === id) return { ...f, status: "processing" };
         return f;
       }));
+      
       triggerToast(`Re-indexing document "${name}"...`);
 
-      setTimeout(async () => {
-        try {
-          const { error: updateError } = await supabase
-            .from("knowledge_sources")
-            .update({ status: "ready" })
-            .eq("id", id);
+      // Invoke processing API
+      const response = await fetch("/api/knowledge/process", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ documentId: id }),
+      });
 
-          if (updateError) throw updateError;
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to complete re-sync.");
+      }
 
-          setFiles(prev => prev.map(f => {
-            if (f.id === id) return { ...f, status: "indexed" };
-            return f;
-          }));
-          triggerToast(`Re-indexing complete for "${name}"!`);
-        } catch (err) {
-          console.error("Re-index update failed:", err);
-        }
-      }, 2500);
-    } catch (err: unknown) {
+      triggerToast(`Re-indexing complete for "${name}"!`);
+      fetchFiles(true);
+    } catch (err: any) {
       console.error("Re-sync trigger failed:", err);
-      triggerToast("Failed to initiate re-sync.");
+      triggerToast(`Error: ${err.message || "Failed to re-index document."}`);
+      fetchFiles(true);
     }
   };
 
@@ -283,7 +348,6 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
       case "pdf":
         return <File className="h-5 w-5 text-red-400" />;
       case "csv":
-      case "xlsx":
         return <FileSpreadsheet className="h-5 w-5 text-emerald-400" />;
       case "docx":
         return <FileText className="h-5 w-5 text-blue-400" />;
@@ -336,9 +400,18 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-md font-semibold">Training Documents</CardTitle>
-              <CardDescription>Drag and drop text, PDF, Word or Excel documents to sync</CardDescription>
+              <CardDescription>Drag and drop text, PDF, Word or CSV documents to sync</CardDescription>
             </CardHeader>
             <CardContent>
+              {/* Hidden file input placed outside the clickable div */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept=".pdf,.docx,.txt,.csv"
+                className="hidden"
+              />
+
               {/* Drag Drop Area */}
               <div
                 onDragEnter={handleDrag}
@@ -352,14 +425,6 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
                     : "border-border/60 hover:border-indigo-500/40 hover:bg-white/5"
                 } ${isUploading ? "pointer-events-none opacity-80" : ""}`}
               >
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  accept=".pdf,.docx,.txt,.csv"
-                  className="hidden"
-                />
-
                 {isUploading ? (
                   <div className="space-y-4 py-4">
                     <Loader2 className="h-8 w-8 text-indigo-400 animate-spin mx-auto" />
@@ -390,7 +455,7 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
           </Card>
         </div>
 
-        {/* Right Side: Training Stats / Instructions (1 col) */}
+        {/* Right Side: Indexing Analytics (1 col) */}
         <Card className="h-full">
           <CardHeader className="pb-3">
             <CardTitle className="text-md font-semibold">Indexing Analytics</CardTitle>
@@ -399,20 +464,24 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
           <CardContent className="space-y-4">
             <div className="space-y-3.5">
               <div className="flex justify-between items-center text-xs">
-                <span className="text-muted-foreground">Indexed Vectors</span>
-                <span className="font-semibold text-white font-mono">{files.filter(f => f.status === "indexed").length * 8 || 0} chunks</span>
-              </div>
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-muted-foreground">Total Sources</span>
+                <span className="text-muted-foreground">Total Documents</span>
                 <span className="font-semibold text-white font-mono">{files.length} sources</span>
               </div>
               <div className="flex justify-between items-center text-xs">
-                <span className="text-muted-foreground">Chunk Size limit</span>
-                <span className="font-semibold text-white font-mono">1,000 tokens</span>
+                <span className="text-muted-foreground">Total Chunks</span>
+                <span className="font-semibold text-white font-mono">{totalChunks} chunks</span>
               </div>
               <div className="flex justify-between items-center text-xs">
-                <span className="text-muted-foreground">Overlap size</span>
-                <span className="font-semibold text-white font-mono">200 tokens</span>
+                <span className="text-muted-foreground">Indexed Documents</span>
+                <span className="font-semibold text-emerald-400 font-mono">
+                  {files.filter(f => f.status === "indexed").length} docs
+                </span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-muted-foreground">Failed Documents</span>
+                <span className="font-semibold text-red-400 font-mono">
+                  {files.filter(f => f.status === "failed").length} docs
+                </span>
               </div>
             </div>
 
@@ -420,7 +489,7 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
               <div className="flex gap-2.5 text-xs text-muted-foreground leading-normal">
                 <Info className="h-4 w-4 text-indigo-400 shrink-0 mt-0.5" />
                 <p className="text-[11px]">
-                  Files uploaded are automatically parsed, chunked, and embedded into local storage vector arrays for high-efficiency FAQ answer mapping.
+                  Files uploaded are automatically parsed, chunked (1,000 chars, 200 overlap), and embedded into OpenAI vector arrays for RAG chatbot context mappings.
                 </p>
               </div>
             </div>

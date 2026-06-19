@@ -118,7 +118,7 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
           supabase.from("chat_sessions").select("*", { count: "exact", head: true }).eq("client_id", clientId),
           supabase.from("chat_messages").select("*", { count: "exact", head: true }).eq("client_id", clientId),
           supabase.from("leads").select("*", { count: "exact", head: true }).eq("client_id", clientId),
-          supabase.from("knowledge_sources").select("*", { count: "exact", head: true }).eq("client_id", clientId)
+          supabase.from("knowledge_documents").select("*", { count: "exact", head: true }).eq("workspace_id", clientId)
         ]);
 
         setStats({

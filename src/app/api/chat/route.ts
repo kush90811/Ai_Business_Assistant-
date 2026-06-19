@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getGroqChatCompletion, type ChatMessage } from "@/lib/groq";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { generateEmbedding } from "@/lib/embeddings";
 
 type ChatRequestPayload = {
   message: string;
@@ -188,7 +189,37 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     const brandName = widgetConfig?.brand_name || "our business";
-    const systemPrompt = `You are a helpful, professional, and friendly AI Business Assistant representing ${brandName}. Answer user inquiries clearly and concisely based on context.`;
+
+    // 4b. Retrieve RAG context from the knowledge base using vector similarity search
+    let contextText = "";
+    try {
+      console.log(`[RAG Chat] Fetching semantic context for message: "${message.trim()}"`);
+      const queryEmbedding = await generateEmbedding(message.trim());
+      
+      const { data: chunks, error: matchError } = await supabase.rpc("match_chunks", {
+        query_embedding: queryEmbedding,
+        match_threshold: 0.3,
+        match_count: 5,
+        filter_workspace_id: activeClientId
+      });
+
+      if (matchError) {
+        console.error("[RAG Chat Error] pgvector similarity search failed:", matchError);
+      } else if (chunks && chunks.length > 0) {
+        console.log(`[RAG Chat] Retrieved ${chunks.length} matching chunks for prompt context.`);
+        contextText = chunks.map((c: any) => c.chunk_text).join("\n\n");
+      } else {
+        console.log("[RAG Chat] No matching chunks found in knowledge base.");
+      }
+    } catch (err) {
+      console.error("[RAG Chat Error] Failed to generate query embedding or query vectors:", err);
+    }
+
+    let systemPrompt = `You are a helpful, professional, and friendly AI Business Assistant representing ${brandName}. Answer user inquiries clearly and concisely based on context.`;
+
+    if (contextText) {
+      systemPrompt += `\n\nUse the following retrieved context from our knowledge base to answer the user's question. First, answer strictly using the provided context. If the answer cannot be determined from the context, state clearly and politely: "I don't have that information in my knowledge base, but I can help you with other questions." Do not hallucinate or make up details.\n\nRetrieved Context:\n${contextText}`;
+    }
 
     // Map conversation history to the ChatMessage format
     const formattedMessages: ChatMessage[] = [

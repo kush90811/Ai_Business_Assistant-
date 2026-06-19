@@ -6,4 +6,5 @@ export const env = {
   databaseUrl: process.env.DATABASE_URL ?? "",
   groqApiKey: process.env.GROQ_API_KEY ?? "",
   groqModel: process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile",
+  openaiApiKey: process.env.OPENAI_API_KEY ?? "",
 } as const;
