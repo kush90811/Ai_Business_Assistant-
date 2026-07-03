@@ -23,6 +23,7 @@ export function ChatWidget({ config }: ChatWidgetProps) {
   const [messages, setMessages] = useState<WidgetMessage[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
+  const [visitorId, setVisitorId] = useState<string>("");
   const [showQuickActions, setShowQuickActions] = useState(true);
 
   const { companyName, accentColor, greeting, logoUrl, clientId } = config;
@@ -34,44 +35,78 @@ export function ChatWidget({ config }: ChatWidgetProps) {
     }
   }, [isOpen]);
 
-  // 1. Initialize session and welcome message
+  // Consolidated widget initialization
   useEffect(() => {
-    // Load existing sessionId from localStorage if available
-    const savedSessionKey = `chatbot_session_${clientId}`;
-    const savedSessionId = localStorage.getItem(savedSessionKey);
-    if (savedSessionId) {
-      setSessionId(savedSessionId);
-      // Fetch past messages from Supabase or load a clean state
-      // For a fresh preview experience, we can reload history or start fresh.
-      // Let's load the saved session messages if possible.
-      // For now, let's seed with the greeting and check if we want to restore.
+    async function initializeWidget() {
+      const visitorKey = `chatbot_visitor_${clientId}`;
+      const savedSessionKey = `chatbot_session_${clientId}`;
+      
+      const storedVisitorId = localStorage.getItem(visitorKey);
+      const storedSessionId = localStorage.getItem(savedSessionKey);
+
+      try {
+        const response = await fetch("/api/widget/init", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientId,
+            visitorId: storedVisitorId || null,
+            sessionId: storedSessionId || null,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          
+          setVisitorId(data.visitorId);
+          localStorage.setItem(visitorKey, data.visitorId);
+
+          if (data.sessionId) {
+            setSessionId(data.sessionId);
+            localStorage.setItem(savedSessionKey, data.sessionId);
+          } else {
+            setSessionId(undefined);
+            localStorage.removeItem(savedSessionKey);
+          }
+
+          if (data.history && data.history.length > 0) {
+            setMessages(data.history);
+          } else {
+            setMessages([
+              {
+                id: "msg-welcome",
+                role: "assistant",
+                content: data.greeting || greeting,
+                timestamp: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+              },
+            ]);
+          }
+        } else {
+          throw new Error("Failed to initialize widget backend state.");
+        }
+      } catch (err) {
+        console.error("[Widget Init Fail] Falling back to local defaults:", err);
+        const resolvedVisitorId = storedVisitorId || `visitor_${Math.random().toString(36).substring(2, 15)}`;
+        setVisitorId(resolvedVisitorId);
+        localStorage.setItem(visitorKey, resolvedVisitorId);
+
+        if (storedSessionId) {
+          setSessionId(storedSessionId);
+        }
+
+        setMessages([
+          {
+            id: "msg-welcome",
+            role: "assistant",
+            content: greeting,
+            timestamp: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+          },
+        ]);
+      }
     }
 
-    const initialGreeting: WidgetMessage = {
-      id: "msg-welcome",
-      role: "assistant",
-      content: greeting,
-      timestamp: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
-    };
-
-    setMessages([initialGreeting]);
-  }, [greeting, clientId]);
-
-  // Load chat history if session exists
-  useEffect(() => {
-    if (!sessionId) return;
-    
-    const fetchHistory = async () => {
-      try {
-        // Direct query or use client-side Supabase client to fetch messages
-        // Since we are unauthenticated, we can do a simple fetch if there's an endpoint.
-        // For simplicity and widget responsiveness, we'll maintain local state.
-      } catch (err) {
-        console.error("Failed to restore history:", err);
-      }
-    };
-    fetchHistory();
-  }, [sessionId]);
+    initializeWidget();
+  }, [clientId, greeting]);
 
   const handleSendMessage = async (text: string) => {
     // 1. Append User Message
@@ -109,9 +144,11 @@ export function ChatWidget({ config }: ChatWidgetProps) {
           message: text,
           clientId: clientId,
           sessionId: sessionId,
-          visitorId: `widget-visitor-${clientId.slice(0, 4)}`
+          visitorId: visitorId || undefined
         }),
       });
+
+      console.log("[Widget] Sent visitorId:", visitorId, "sessionId:", sessionId);
 
       const data = await response.json();
       if (!response.ok) {

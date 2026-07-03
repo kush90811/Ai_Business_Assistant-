@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-require-imports */
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getCurrentSession } from "@/lib/auth/session";
@@ -173,9 +173,26 @@ export async function POST(request: NextRequest) {
 
     if (fileType === "pdf") {
       try {
-        const pdf = require("pdf-parse");
-        const parsedPdf = await pdf(buffer);
-        extractedText = parsedPdf.text || "";
+        const path = require("path");
+        const { pathToFileURL } = require("url");
+        const { PDFParse } = require("pdf-parse");
+
+        // Dynamically resolve the worker file path to bypass Next.js bundling issues
+        // We use eval('require') to prevent Webpack from statically bundling require.resolve at build time
+        const pdfParsePath = eval('require').resolve("pdf-parse");
+        const pdfParseDir = path.dirname(pdfParsePath);
+        const workerPath = path.join(pdfParseDir, "pdf.worker.mjs");
+        const workerUrl = pathToFileURL(workerPath).href;
+
+        PDFParse.setWorker(workerUrl);
+
+        const parser = new PDFParse({ data: buffer });
+        try {
+          const parsedPdf = await parser.getText();
+          extractedText = parsedPdf.text || "";
+        } finally {
+          await parser.destroy();
+        }
       } catch (pdfErr: any) {
         throw new Error(`PDF Parsing failed: ${pdfErr.message}`);
       }

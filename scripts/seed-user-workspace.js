@@ -3,7 +3,6 @@ const { Client } = require('pg');
 const fs = require('fs');
 const path = require('path');
 
-// Simple helper to load environment variables from .env.local
 const loadEnv = () => {
   const envPath = path.join(__dirname, '../.env.local');
   if (!fs.existsSync(envPath)) {
@@ -35,32 +34,46 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
-const runMigration = async () => {
-  console.log("Connecting to database using URL in .env.local...");
+const seed = async () => {
   const client = new Client({
     connectionString: databaseUrl,
-    ssl: {
-      rejectUnauthorized: false
-    }
+    ssl: { rejectUnauthorized: false }
   });
 
   try {
     await client.connect();
-    console.log("Successfully connected to Supabase database.");
+    console.log("Connected to database for user mapping seed.");
 
-    const migrationFile = path.join(__dirname, '../supabase/migrations/002_knowledge_base_rag.sql');
-    console.log(`Loading migration file: ${migrationFile}`);
-    const sql = fs.readFileSync(migrationFile, 'utf-8');
+    const clientId = '3d8b4428-6916-41c1-ac8b-44197c405b0c';
+    const users = [
+      { id: 'bd47b5de-4415-44bd-a1a3-bdb3e937974f', email: 'kush.tarkshy@gmail.com', name: 'Kush Tarkshy' },
+      { id: '07d9ba15-aea9-4354-b79e-b8436dc270c3', email: 'kushkundariya45@gmail.com', name: 'Kush Kundariya' }
+    ];
 
-    console.log("Executing SQL migration...");
-    await client.query(sql);
-    console.log("Migration executed successfully! Vector RAG schema is now deployed.");
+    for (const user of users) {
+      console.log(`Processing mapping for user: ${user.email} (${user.id})`);
+      
+      // 1. Insert Profile
+      await client.query(`
+        INSERT INTO public.profiles (id, full_name, email, avatar_url, is_super_admin)
+        VALUES ($1, $2, $3, NULL, false)
+        ON CONFLICT (id) DO UPDATE SET full_name = $2, email = $3;
+      `, [user.id, user.name, user.email]);
+
+      // 2. Insert Client User Mapping
+      await client.query(`
+        INSERT INTO public.client_users (client_id, user_id, role)
+        VALUES ($1, $2, 'client_admin')
+        ON CONFLICT (client_id, user_id) DO NOTHING;
+      `, [clientId, user.id]);
+    }
+
+    console.log("Seed operations complete.");
   } catch (err) {
-    console.error("Migration execution failed:", err);
-    process.exit(1);
+    console.error("Seed failed:", err);
   } finally {
     await client.end();
   }
 };
 
-runMigration();
+seed();

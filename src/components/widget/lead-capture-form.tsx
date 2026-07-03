@@ -28,20 +28,33 @@ export function LeadCaptureForm({ clientId, sessionId, accentColor, onSubmitSucc
     setSubmitting(true);
 
     try {
-      const response = await fetch("/api/widget/lead", {
-        method: "POST",
+      const url = "/api/widget/lead";
+      const method = "POST";
+      const bodyPayload = {
+        clientId,
+        sessionId,
+        name: name.trim() || "Anonymous Visitor",
+        email: email.trim().toLowerCase() || null,
+        phone: phone.trim() || null,
+        source: "chatbot-widget"
+      };
+
+      console.log(`[Widget Form] Request URL: ${url}`);
+      console.log(`[Widget Form] HTTP Method: ${method}`);
+      console.log(`[Widget Form] Payload:`, JSON.stringify(bodyPayload));
+
+      const response = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId,
-          sessionId,
-          name: name.trim() || "Anonymous Visitor",
-          email: email.trim().toLowerCase() || null,
-          phone: phone.trim() || null,
-          source: "chatbot-widget"
-        }),
+        body: JSON.stringify(bodyPayload),
       });
 
-      const data = await response.json();
+      console.log(`[Widget Form] Response Status: ${response.status}`);
+      
+      const rawText = await response.text();
+      console.log(`[Widget Form] Raw Response Body:`, rawText);
+
+      const data = JSON.parse(rawText);
       if (!response.ok) {
         throw new Error(data.error || "Failed to submit contact details.");
       }

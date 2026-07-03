@@ -1,7 +1,9 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { getGroqChatCompletion, type ChatMessage } from "@/lib/groq";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { generateEmbedding } from "@/lib/embeddings";
+import { LeadCaptureService, type LeadCaptureResult } from "@/lib/services/lead-capture";
 
 type ChatRequestPayload = {
   message: string;
@@ -16,12 +18,16 @@ export async function POST(request: Request) {
     try {
       payload = await request.json();
     } catch {
+      console.log("[API Return] 400 - Invalid JSON payload.");
       return NextResponse.json({ error: "Invalid JSON payload." }, { status: 400 });
     }
 
     const { message, clientId, sessionId, visitorId } = payload;
 
+    console.log(`[API] Received visitorId: ${visitorId}, sessionId: ${sessionId}, clientId: ${clientId}`);
+
     if (!message || typeof message !== "string" || message.trim() === "") {
+      console.log("[API Return] 400 - Message is required.");
       return NextResponse.json({ error: "Message is required." }, { status: 400 });
     }
 
@@ -29,25 +35,27 @@ export async function POST(request: Request) {
     let activeSessionId = sessionId;
     let activeClientId = clientId;
 
-    // 1. Session verification / creation
+    // 1. Session verification & resolution
     if (activeSessionId) {
       // Load session to get the associated clientId
-      const { data: session, error: sessionError } = await supabase
+      const { data: session } = await supabase
         .from("chat_sessions")
         .select("client_id")
         .eq("id", activeSessionId)
-        .single();
+        .maybeSingle();
 
-      if (sessionError || !session) {
-        return NextResponse.json(
-          { error: "Chat session not found or invalid." },
-          { status: 404 }
-        );
+      if (session) {
+        activeClientId = session.client_id;
+      } else {
+        console.log(`[API] Stale or invalid sessionId provided: ${activeSessionId}. Clearing to force session recreation.`);
+        activeSessionId = undefined;
       }
-      activeClientId = session.client_id;
-    } else {
-      // If no session exists, we must have a clientId to start a new one
+    }
+
+    if (!activeSessionId) {
+      // If no session exists (or was stale), we must have a clientId to start a new one
       if (!activeClientId) {
+        console.log("[API Return] 400 - clientId is required to start a new chat session.");
         return NextResponse.json(
           { error: "clientId is required to start a new chat session." },
           { status: 400 }
@@ -59,9 +67,10 @@ export async function POST(request: Request) {
         .from("clients")
         .select("id")
         .eq("id", activeClientId)
-        .single();
+        .maybeSingle();
 
       if (clientError || !client) {
+        console.log(`[API Return] 404 - Client not found. activeClientId: ${activeClientId}`);
         return NextResponse.json(
           { error: "Client not found." },
           { status: 404 }
@@ -80,6 +89,7 @@ export async function POST(request: Request) {
         .single();
 
       if (createSessionError || !newSession) {
+        console.log(`[API Return] 500 - Failed to create chat session: ${createSessionError?.message}`);
         return NextResponse.json(
           { error: `Failed to create chat session: ${createSessionError?.message}` },
           { status: 500 }
@@ -87,10 +97,12 @@ export async function POST(request: Request) {
       }
 
       activeSessionId = newSession.id;
+      console.log(`[API] Created new chat session: ${activeSessionId} for client: ${activeClientId}`);
     }
 
     // Double check we have a valid clientId and sessionId
     if (!activeClientId || !activeSessionId) {
+      console.log("[API Return] 500 - Failed to resolve tenant context.");
       return NextResponse.json({ error: "Failed to resolve tenant context." }, { status: 500 });
     }
 
@@ -103,70 +115,49 @@ export async function POST(request: Request) {
     });
 
     if (userMsgError) {
+      console.log(`[API Return] 500 - Failed to store user message: ${userMsgError.message}`);
       return NextResponse.json(
         { error: `Failed to store user message: ${userMsgError.message}` },
         { status: 500 }
       );
     }
 
-    // Lead Capture Logic
-    const contactInfo = extractContactInfo(message);
-    if (contactInfo.email || contactInfo.phone || contactInfo.name) {
-      let existingLead = null;
-
-      // Check if a lead with same email or phone already exists for this client
-      if (contactInfo.email || contactInfo.phone) {
-        let query = supabase.from("leads").select("*").eq("client_id", activeClientId);
-        
-        if (contactInfo.email && contactInfo.phone) {
-          query = query.or(`email.eq."${contactInfo.email}",phone.eq."${contactInfo.phone}"`);
-        } else if (contactInfo.email) {
-          query = query.eq("email", contactInfo.email);
-        } else {
-          query = query.eq("phone", contactInfo.phone);
-        }
-
-        const { data } = await query.limit(1).maybeSingle();
-        existingLead = data;
-      }
-
-      if (existingLead) {
-        // Update existing lead with new info if available
-        const updates: { email?: string; phone?: string; name?: string; session_id?: string } = {};
-        if (contactInfo.email && !existingLead.email) {
-          updates.email = contactInfo.email;
-        }
-        if (contactInfo.phone && !existingLead.phone) {
-          updates.phone = contactInfo.phone;
-        }
-        if (contactInfo.name && !existingLead.name) {
-          updates.name = contactInfo.name;
-        }
-        if (!existingLead.session_id) {
-          updates.session_id = activeSessionId;
-        }
-
-        if (Object.keys(updates).length > 0) {
-          await supabase
-            .from("leads")
-            .update(updates)
-            .eq("id", existingLead.id);
-        }
-      } else {
-        // Create new lead
-        await supabase.from("leads").insert({
-          client_id: activeClientId,
-          session_id: activeSessionId,
-          name: contactInfo.name,
-          email: contactInfo.email,
-          phone: contactInfo.phone,
-          status: "new",
-          source: "chatbot",
-        });
-      }
+    // 2. Process Lead Capture and handle conflicts/confirmations
+    let leadResult: LeadCaptureResult = { hasConflict: false };
+    try {
+      leadResult = await LeadCaptureService.processMessage(
+        message.trim(),
+        activeClientId,
+        activeSessionId,
+        visitorId
+      );
+    } catch (err) {
+      console.error("[RAG Chat Error] Lead capture service failed:", err);
     }
 
-    // 3. Fetch past messages for context (limit to last 50 to avoid prompt size limits)
+    if (leadResult.hasConflict && leadResult.response) {
+      // Store the conflict response in the database as the assistant's message
+      await supabase.from("chat_messages").insert({
+        client_id: activeClientId,
+        session_id: activeSessionId,
+        role: "assistant",
+        content: leadResult.response,
+      });
+
+      // Update last activity timestamp on the session
+      await supabase
+        .from("chat_sessions")
+        .update({ last_activity_at: new Date().toISOString() })
+        .eq("id", activeSessionId);
+
+      console.log(`[API Return] 200 - Conflict/Confirmation response: "${leadResult.response}"`);
+      return NextResponse.json({
+        response: leadResult.response,
+        sessionId: activeSessionId,
+      });
+    }
+
+    // 3. Fetch past messages for current session context (limit to last 50 to avoid prompt size limits)
     const { data: history, error: historyError } = await supabase
       .from("chat_messages")
       .select("role, content")
@@ -175,10 +166,66 @@ export async function POST(request: Request) {
       .limit(50);
 
     if (historyError) {
+      console.log(`[API Return] 500 - Failed to retrieve chat history: ${historyError.message}`);
       return NextResponse.json(
         { error: `Failed to retrieve chat history: ${historyError.message}` },
         { status: 500 }
       );
+    }
+
+    // 3b. Fetch visitor profile if visitorId is provided
+    let visitorProfile = null;
+    if (visitorId) {
+      const { data: visitorSessions } = await supabase
+        .from("chat_sessions")
+        .select("id")
+        .eq("visitor_id", visitorId)
+        .eq("client_id", activeClientId);
+
+      if (visitorSessions && visitorSessions.length > 0) {
+        const sessionIds = visitorSessions.map((s) => s.id);
+        const { data: leads } = await supabase
+          .from("leads")
+          .select("*")
+          .in("session_id", sessionIds)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (leads && leads.length > 0) {
+          visitorProfile = leads[0];
+          console.log(`[Memory] Found known visitor profile: ${visitorProfile.name}`);
+        }
+      }
+    }
+
+    // 3c. Fetch background conversation context (past messages from previous sessions of this visitor)
+    let backgroundContext = "";
+    if (visitorId && activeSessionId) {
+      const { data: otherSessions } = await supabase
+        .from("chat_sessions")
+        .select("id")
+        .eq("visitor_id", visitorId)
+        .eq("client_id", activeClientId)
+        .neq("id", activeSessionId);
+
+      if (otherSessions && otherSessions.length > 0) {
+        const otherSessionIds = otherSessions.map((s) => s.id);
+        
+        const { data: pastMsgs } = await supabase
+          .from("chat_messages")
+          .select("role, content, created_at")
+          .in("session_id", otherSessionIds)
+          .order("created_at", { ascending: false })
+          .limit(20);
+
+        if (pastMsgs && pastMsgs.length > 0) {
+          const chronologicalMsgs = [...pastMsgs].reverse();
+          backgroundContext = chronologicalMsgs
+            .map((m) => `${m.role === "user" ? "Visitor" : "AI Assistant"}: ${m.content}`)
+            .join("\n");
+          console.log(`[Memory] Loaded ${pastMsgs.length} historical messages as context.`);
+        }
+      }
     }
 
     // 4. Fetch widget config to customize the system prompt if available
@@ -215,7 +262,29 @@ export async function POST(request: Request) {
       console.error("[RAG Chat Error] Failed to generate query embedding or query vectors:", err);
     }
 
+    // Assemble the System Prompt
     let systemPrompt = `You are a helpful, professional, and friendly AI Business Assistant representing ${brandName}. Answer user inquiries clearly and concisely based on context.`;
+
+    if (visitorProfile) {
+      const profileInfo = [];
+      if (visitorProfile.name) profileInfo.push(`Name: ${visitorProfile.name}`);
+      if (visitorProfile.email) profileInfo.push(`Email: ${visitorProfile.email}`);
+      if (visitorProfile.phone) profileInfo.push(`Phone: ${visitorProfile.phone}`);
+      if (visitorProfile.metadata) {
+        const meta = visitorProfile.metadata as Record<string, any>;
+        if (meta.company) profileInfo.push(`Company: ${meta.company}`);
+        if (meta.city) profileInfo.push(`City: ${meta.city}`);
+        if (meta.country) profileInfo.push(`Country: ${meta.country}`);
+      }
+      
+      if (profileInfo.length > 0) {
+        systemPrompt += `\n\nVisitor Profile (Known information from CRM/Leads, greet them by name if they are returning): \n${profileInfo.join("\n")}`;
+      }
+    }
+
+    if (backgroundContext) {
+      systemPrompt += `\n\nConversation Memory (Previous discussions from past sessions of this visitor, use this context to remember past requests naturally): \n${backgroundContext}`;
+    }
 
     if (contextText) {
       systemPrompt += `\n\nUse the following retrieved context from our knowledge base to answer the user's question. First, answer strictly using the provided context. If the answer cannot be determined from the context, state clearly and politely: "I don't have that information in my knowledge base, but I can help you with other questions." Do not hallucinate or make up details.\n\nRetrieved Context:\n${contextText}`;
@@ -238,6 +307,7 @@ export async function POST(request: Request) {
       assistantReply = await getGroqChatCompletion(formattedMessages);
     } catch (groqError: unknown) {
       const errMsg = groqError instanceof Error ? groqError.message : String(groqError);
+      console.log(`[API Return] 502 - Groq Completion Failed: ${errMsg}`);
       return NextResponse.json(
         { error: `Groq Completion Failed: ${errMsg}` },
         { status: 502 }
@@ -253,6 +323,7 @@ export async function POST(request: Request) {
     });
 
     if (assistantMsgError) {
+      console.log(`[API Return] 500 - Failed to store assistant message: ${assistantMsgError.message}`);
       return NextResponse.json(
         { error: `Failed to store assistant message: ${assistantMsgError.message}` },
         { status: 500 }
@@ -265,12 +336,16 @@ export async function POST(request: Request) {
       .update({ last_activity_at: new Date().toISOString() })
       .eq("id", activeSessionId);
 
+
+
     // Return the response details
+    console.log(`[API Return] 200 - Success. assistantReply length: ${assistantReply.length}`);
     return NextResponse.json({
       response: assistantReply,
       sessionId: activeSessionId,
     });
   } catch (error: unknown) {
+    console.error("[API Return] 500 - Internal Server Error. Full stack trace:", error);
     const errMsg = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
       { error: `Internal Server Error: ${errMsg}` },
@@ -279,32 +354,4 @@ export async function POST(request: Request) {
   }
 }
 
-function extractContactInfo(text: string) {
-  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-  // Match standard numbers (local and international formats)
-  const phoneRegex = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g;
 
-  const emails = text.match(emailRegex);
-  const phones = text.match(phoneRegex);
-
-  let name: string | null = null;
-  const nameRegexes = [
-    /my name is\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i,
-    /i am\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i,
-    /call me\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)/i,
-  ];
-
-  for (const regex of nameRegexes) {
-    const match = text.match(regex);
-    if (match && match[1]) {
-      name = match[1].trim();
-      break;
-    }
-  }
-
-  return {
-    email: emails ? emails[0].toLowerCase() : null,
-    phone: phones ? phones[0].trim() : null,
-    name,
-  };
-}

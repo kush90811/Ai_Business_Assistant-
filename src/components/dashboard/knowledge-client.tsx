@@ -1,5 +1,6 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { 
   Upload, 
@@ -61,6 +62,7 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
 
   const fetchFiles = useCallback(async (silent = false) => {
     if (!clientId) {
+      console.warn("[Knowledge Base UI] Cannot fetch documents: tenant clientId is undefined in session context.", session);
       setLoading(false);
       return;
     }
@@ -69,6 +71,7 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
     setErrorMessage("");
 
     try {
+      console.log(`[Knowledge Base UI] Fetching registry documents for workspace: ${clientId}`);
       // 1. Fetch document registry
       const { data, error } = await supabase
         .from("knowledge_documents")
@@ -85,7 +88,7 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
         .eq("workspace_id", clientId);
 
       if (chunksError) {
-        console.error("Failed to load chunks count:", chunksError);
+        console.error("[Knowledge Base UI Error] Failed to load chunks count:", chunksError);
       } else {
         setTotalChunks(chunksCount || 0);
       }
@@ -114,15 +117,16 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
         };
       });
 
+      console.log(`[Knowledge Base UI Success] Found ${mapped.length} registered documents.`);
       setFiles(mapped);
     } catch (err: unknown) {
-      console.error("Failed to load knowledge documents:", err);
+      console.error("[Knowledge Base UI Error] Failed to load knowledge documents:", err);
       const msg = err instanceof Error ? err.message : "Could not retrieve knowledge registry.";
       setErrorMessage(msg);
     } finally {
       setLoading(false);
     }
-  }, [clientId, supabase]);
+  }, [clientId, supabase, session]);
 
   useEffect(() => {
     fetchFiles();
@@ -137,19 +141,35 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
   };
 
   const startRealUpload = async (file: File) => {
-    if (isUploading || !clientId) return;
+    console.log("[Client Upload Request] Triggered startRealUpload for file:", file.name, "size:", file.size, "workspace:", clientId);
+
+    if (!clientId) {
+      const errMsg = "Cannot upload file: Workspace ID is undefined. Complete onboarding first.";
+      console.error(`[Client Upload Request Error] ${errMsg}`);
+      triggerToast(`Error: ${errMsg}`);
+      return;
+    }
+
+    if (isUploading) {
+      console.warn("[Client Upload Request Warning] Upload is already in progress, ignoring duplicate event.");
+      return;
+    }
 
     // Validate extension
     const allowedExtensions = ["pdf", "docx", "txt", "csv"];
     const ext = file.name.split(".").pop()?.toLowerCase() || "";
     if (!allowedExtensions.includes(ext)) {
-      triggerToast("Error: Unsupported file type. Please upload PDF, DOCX, TXT, or CSV.");
+      const extMsg = "Unsupported file type. Please upload PDF, DOCX, TXT, or CSV.";
+      console.error(`[Client Upload Request Error] ${extMsg} Extracted extension: ${ext}`);
+      triggerToast(`Error: ${extMsg}`);
       return;
     }
 
     // Validate size (10MB limit)
     if (file.size > 10 * 1024 * 1024) {
-      triggerToast("Error: File exceeds 10MB limit.");
+      const sizeMsg = "File size exceeds 10MB limit.";
+      console.error(`[Client Upload Request Error] ${sizeMsg}`);
+      triggerToast(`Error: ${sizeMsg}`);
       return;
     }
     
@@ -163,8 +183,9 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
       const storagePath = `${clientId}/${documentId}_${file.name}`;
       const fileSizeStr = formatFileSize(file.size);
 
+      console.log(`[Client DB Insert] Attempting to insert placeholder document record: docId=${documentId}, path=${storagePath}, status=uploading`);
       // 1. Insert record into database in "uploading" status
-      const { error: insertError } = await supabase
+      const { data: dbData, error: insertError } = await supabase
         .from("knowledge_documents")
         .insert({
           id: documentId,
@@ -174,14 +195,20 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
           file_size: fileSizeStr,
           storage_path: storagePath,
           status: "uploading"
-        });
+        })
+        .select();
 
-      if (insertError) throw new Error(`Database error: ${insertError.message}`);
+      if (insertError) {
+        console.error("[Client DB Insert Response Error] Failed to create database registry entry:", insertError);
+        throw new Error(`Database error: ${insertError.message}`);
+      }
       
+      console.log("[Client DB Insert Response Success] Placeholder record inserted successfully:", dbData);
       setUploadProgress(40);
 
+      console.log(`[Client Storage Upload] Uploading to Supabase Storage: bucket=knowledge-files, path=${storagePath}`);
       // 2. Upload file to Supabase storage bucket 'knowledge-files'
-      const { error: uploadError } = await supabase.storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
         .from("knowledge-files")
         .upload(storagePath, file, {
           cacheControl: "3600",
@@ -189,7 +216,8 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
         });
 
       if (uploadError) {
-        // Update database record to failed
+        console.error("[Client Storage Upload Response Error] File storage upload failed:", uploadError);
+        console.log(`[Client DB Update] Marking document status as failed in database: ${documentId}`);
         await supabase
           .from("knowledge_documents")
           .update({ status: "failed" })
@@ -197,17 +225,24 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
         throw new Error(`Storage upload error: ${uploadError.message}`);
       }
 
+      console.log("[Client Storage Upload Response Success] File stored in Supabase storage bucket:", uploadData);
       setUploadProgress(70);
 
+      console.log(`[Client DB Update] Updating status to 'processing' for document: ${documentId}`);
       // Update status to processing
-      await supabase
+      const { error: processUpdateErr } = await supabase
         .from("knowledge_documents")
         .update({ status: "processing" })
         .eq("id", documentId);
+
+      if (processUpdateErr) {
+        console.warn("[Client DB Update Warning] Failed to update document status to 'processing':", processUpdateErr);
+      }
       
       fetchFiles(true);
       setUploadProgress(90);
 
+      console.log(`[Client API Process Invocator] Invoking backend parsing API: POST /api/knowledge/process, body={documentId: "${documentId}"}`);
       // 3. Call backend parsing & embeddings endpoint
       const response = await fetch("/api/knowledge/process", {
         method: "POST",
@@ -217,16 +252,21 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
         body: JSON.stringify({ documentId }),
       });
 
+      console.log(`[Client API Process Response] Status code: ${response.status}`);
       if (!response.ok) {
         const errorData = await response.json();
+        console.error("[Client API Process Response Error] Backend processing failed:", errorData);
         throw new Error(errorData.error || "Failed to process and index document.");
       }
+
+      const successData = await response.json();
+      console.log("[Client API Process Response Success] Document parsed, chunked, and embedded:", successData);
 
       setUploadProgress(100);
       triggerToast(`Uploaded and indexed "${file.name}" successfully!`);
       
     } catch (err: any) {
-      console.error("Upload/Processing failed:", err);
+      console.error("[Client Upload Pipeline Crash] Error encountered during upload flow:", err);
       triggerToast(`Error: ${err.message || "Failed to process file."}`);
     } finally {
       setIsUploading(false);
@@ -265,6 +305,7 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
   };
 
   const handleDeleteFile = async (id: string, name: string) => {
+    console.log(`[Client Delete Request] Deleting document: id=${id}, name=${name}`);
     try {
       // 1. Fetch document storage path
       const { data: document, error: docError } = await supabase
@@ -277,16 +318,20 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
 
       // 2. Remove file from Supabase Storage
       if (document?.storage_path) {
+        console.log(`[Client Storage Delete] Removing file from Supabase storage: path=${document.storage_path}`);
         const { error: storageError } = await supabase.storage
           .from("knowledge-files")
           .remove([document.storage_path]);
         
         if (storageError) {
-          console.warn("Storage deletion warning/error:", storageError.message);
+          console.error("[Client Storage Delete Error] Failed to delete storage file:", storageError.message);
+        } else {
+          console.log("[Client Storage Delete Success] Removed storage file successfully.");
         }
       }
 
       // 3. Delete DB record (cascading deletes chunks)
+      console.log(`[Client DB Delete] Deleting database registry entry: id=${id}`);
       const { error: deleteError } = await supabase
         .from("knowledge_documents")
         .delete()
@@ -294,16 +339,18 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
 
       if (deleteError) throw deleteError;
 
+      console.log("[Client DB Delete Success] Database registry entry deleted.");
       setFiles(prev => prev.filter(f => f.id !== id));
       triggerToast(`Removed "${name}" from Knowledge Base.`);
       fetchFiles(true);
     } catch (err: unknown) {
-      console.error("Delete failed:", err);
+      console.error("[Client Delete Request Error] Delete flow failed:", err);
       triggerToast("Failed to delete document from database.");
     }
   };
 
   const handleReSync = async (id: string, name: string) => {
+    console.log(`[Client Re-sync Request] Re-indexing document: id=${id}, name=${name}`);
     try {
       // Set status to processing
       const { error: updateError } = await supabase
@@ -321,6 +368,7 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
       triggerToast(`Re-indexing document "${name}"...`);
 
       // Invoke processing API
+      console.log(`[Client Re-sync Invocator] Calling POST /api/knowledge/process for documentId: ${id}`);
       const response = await fetch("/api/knowledge/process", {
         method: "POST",
         headers: {
@@ -331,13 +379,15 @@ export function KnowledgeClient({ session }: KnowledgeClientProps) {
 
       if (!response.ok) {
         const errorData = await response.json();
+        console.error("[Client Re-sync API Response Error] Re-indexing failed:", errorData);
         throw new Error(errorData.error || "Failed to complete re-sync.");
       }
 
+      console.log("[Client Re-sync API Response Success] Re-indexing successful.");
       triggerToast(`Re-indexing complete for "${name}"!`);
       fetchFiles(true);
     } catch (err: any) {
-      console.error("Re-sync trigger failed:", err);
+      console.error("[Client Re-sync Request Error] Re-sync flow failed:", err);
       triggerToast(`Error: ${err.message || "Failed to re-index document."}`);
       fetchFiles(true);
     }

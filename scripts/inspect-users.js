@@ -3,7 +3,6 @@ const { Client } = require('pg');
 const fs = require('fs');
 const path = require('path');
 
-// Simple helper to load environment variables from .env.local
 const loadEnv = () => {
   const envPath = path.join(__dirname, '../.env.local');
   if (!fs.existsSync(envPath)) {
@@ -35,32 +34,36 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
-const runMigration = async () => {
-  console.log("Connecting to database using URL in .env.local...");
+const inspectUsers = async () => {
   const client = new Client({
     connectionString: databaseUrl,
-    ssl: {
-      rejectUnauthorized: false
-    }
+    ssl: { rejectUnauthorized: false }
   });
 
   try {
     await client.connect();
-    console.log("Successfully connected to Supabase database.");
+    console.log("--- Connected to Database ---");
 
-    const migrationFile = path.join(__dirname, '../supabase/migrations/002_knowledge_base_rag.sql');
-    console.log(`Loading migration file: ${migrationFile}`);
-    const sql = fs.readFileSync(migrationFile, 'utf-8');
+    // 1. Fetch Clients
+    const clientsRes = await client.query("SELECT id, name, slug FROM public.clients;");
+    console.log("Clients:");
+    clientsRes.rows.forEach(r => console.log(` - id: ${r.id}, name: ${r.name}, slug: ${r.slug}`));
 
-    console.log("Executing SQL migration...");
-    await client.query(sql);
-    console.log("Migration executed successfully! Vector RAG schema is now deployed.");
+    // 2. Fetch Client Users
+    const usersRes = await client.query("SELECT id, client_id, user_id, role FROM public.client_users;");
+    console.log("\nClient Users Mapping:");
+    usersRes.rows.forEach(r => console.log(` - id: ${r.id}, client_id: ${r.client_id}, user_id: ${r.user_id}, role: ${r.role}`));
+
+    // 3. Fetch Profiles
+    const profilesRes = await client.query("SELECT id, email, full_name FROM public.profiles;");
+    console.log("\nUser Profiles:");
+    profilesRes.rows.forEach(r => console.log(` - id: ${r.id}, email: ${r.email}, name: ${r.full_name}`));
+
   } catch (err) {
-    console.error("Migration execution failed:", err);
-    process.exit(1);
+    console.error("Query failed:", err);
   } finally {
     await client.end();
   }
 };
 
-runMigration();
+inspectUsers();

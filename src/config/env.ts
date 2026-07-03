@@ -7,4 +7,5 @@ export const env = {
   groqApiKey: process.env.GROQ_API_KEY ?? "",
   groqModel: process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile",
   openaiApiKey: process.env.OPENAI_API_KEY ?? "",
+  ollamaHost: process.env.OLLAMA_HOST ?? "http://localhost:11434",
 } as const;

@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS public.knowledge_chunks (
   document_id uuid NOT NULL REFERENCES public.knowledge_documents(id) ON DELETE CASCADE,
   workspace_id uuid NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
   chunk_text text NOT NULL,
-  embedding vector(1536),
+  embedding vector(768),
   chunk_index int NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (document_id, chunk_index)
@@ -42,7 +42,7 @@ ON public.knowledge_chunks USING hnsw (embedding vector_cosine_ops);
 
 -- Similarity search function
 CREATE OR REPLACE FUNCTION match_chunks (
-  query_embedding vector(1536),
+  query_embedding vector(768),
   match_threshold float,
   match_count int,
   filter_workspace_id uuid

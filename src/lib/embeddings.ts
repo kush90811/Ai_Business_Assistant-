@@ -1,110 +1,93 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { env } from "@/config/env";
 
 /**
- * Helper to execute a fetch request with exponential backoff retries.
+ * Generates a single vector embedding for a query string using local Ollama.
  */
-async function fetchWithRetry(
-  url: string,
-  options: RequestInit,
-  retries = 3,
-  delay = 1000
-): Promise<Response> {
+export async function generateEmbedding(text: string): Promise<number[]> {
+  console.log(`[Ollama Embeddings] generateEmbedding called for text of length ${text.length} characters.`);
+  
+  const ollamaHost = env.ollamaHost;
+  
   try {
-    const res = await fetch(url, options);
-    if (res.status === 429 && retries > 0) {
-      console.warn(`[OpenAI Embeddings] Rate limited (429). Retrying in ${delay}ms...`);
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      return fetchWithRetry(url, options, retries - 1, delay * 2);
+    const response = await fetch(`${ollamaHost}/api/embeddings`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "nomic-embed-text",
+        prompt: text.trim(),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ollama embedding API returned status ${response.status}: ${await response.text()}`);
     }
-    return res;
-  } catch (err) {
-    if (retries > 0) {
-      console.warn(`[OpenAI Embeddings] Request failed. Retrying in ${delay}ms...`, err);
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      return fetchWithRetry(url, options, retries - 1, delay * 2);
+
+    const data = await response.json();
+    const embedding = data.embedding;
+    if (!embedding || !Array.isArray(embedding)) {
+      throw new Error("Invalid response format from Ollama /api/embeddings endpoint.");
     }
+
+    console.log(`[Ollama Embeddings] Successfully generated embedding of dimension ${embedding.length}.`);
+    return embedding;
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error(`[Ollama Embeddings Error] Failed to generate embedding: ${errMsg}`);
     throw err;
   }
 }
 
 /**
- * Generates a single vector embedding for a query string.
- */
-export async function generateEmbedding(text: string): Promise<number[]> {
-  const apiKey = env.openaiApiKey || process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "OpenAI API Key is missing. Please set the OPENAI_API_KEY environment variable."
-    );
-  }
-
-  const response = await fetchWithRetry("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "text-embedding-3-small",
-      input: text,
-    }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(
-      `OpenAI Embedding Generation Failed (${response.status}): ${errText}`
-    );
-  }
-
-  const data = await response.json();
-  const embedding = data.data?.[0]?.embedding;
-  if (!embedding || !Array.isArray(embedding)) {
-    throw new Error("Invalid response format received from OpenAI Embeddings API.");
-  }
-
-  return embedding;
-}
-
-/**
- * Generates multiple vector embeddings in a batch request.
+ * Generates multiple vector embeddings in a batch request using local Ollama.
+ * Tries the modern /api/embed endpoint first, and falls back to /api/embeddings in parallel if needed.
  */
 export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
+  console.log(`[Ollama Embeddings] generateEmbeddings called for ${texts.length} text chunks.`);
+
+  const ollamaHost = env.ollamaHost;
+
+  // Try the modern /api/embed endpoint first (supports batching)
+  try {
+    const response = await fetch(`${ollamaHost}/api/embed`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "nomic-embed-text",
+        input: texts.map(t => t.trim()),
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.embeddings && Array.isArray(data.embeddings)) {
+        console.log(`[Ollama Embeddings] Successfully generated ${data.embeddings.length} embeddings via /api/embed.`);
+        return data.embeddings;
+      }
+    }
+    console.warn(`[Ollama Embeddings] /api/embed failed or returned invalid format. Falling back to individual /api/embeddings requests.`);
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.warn(`[Ollama Embeddings] /api/embed failed with error: ${errMsg}. Falling back to individual /api/embeddings requests.`);
+  }
+
+  // Fallback: process individual embeddings with concurrency limit
+  const results: number[][] = new Array(texts.length);
+  const concurrencyLimit = 4;
   
-  const apiKey = env.openaiApiKey || process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "OpenAI API Key is missing. Please set the OPENAI_API_KEY environment variable."
-    );
+  for (let i = 0; i < texts.length; i += concurrencyLimit) {
+    const batch = texts.slice(i, i + concurrencyLimit);
+    const promises = batch.map(async (text, index) => {
+      const globalIndex = i + index;
+      const embedding = await generateEmbedding(text);
+      results[globalIndex] = embedding;
+    });
+    await Promise.all(promises);
   }
 
-  // OpenAI supports batching inputs. We send all chunks in one request.
-  const response = await fetchWithRetry("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "text-embedding-3-small",
-      input: texts,
-    }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(
-      `OpenAI Batch Embedding Generation Failed (${response.status}): ${errText}`
-    );
-  }
-
-  const data = await response.json();
-  const embeddings = data.data?.map((item: any) => item.embedding);
-  if (!embeddings || embeddings.length !== texts.length) {
-    throw new Error("Received mismatching number of embeddings from OpenAI Embeddings API.");
-  }
-
-  return embeddings;
+  return results;
 }
