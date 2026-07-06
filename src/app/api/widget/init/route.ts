@@ -54,8 +54,12 @@ export async function POST(request: Request) {
       }
     }
 
-    // 3. Find known visitor profile (lead)
+    // 3. Find known visitor profile (lead) — with coherence validation
+    //    Only return a profile if the lead's linked session ALSO still exists.
+    //    This ensures deleted sessions/leads never produce stale profiles.
     let lead = null;
+    let visitorHasValidData = false;
+
     const { data: sessions } = await supabase
       .from("chat_sessions")
       .select("id")
@@ -72,9 +76,20 @@ export async function POST(request: Request) {
         .limit(1);
 
       if (leads && leads.length > 0) {
-        lead = leads[0];
+        // Verify that the lead's linked session still exists
+        const leadSessionId = leads[0].session_id;
+        if (leadSessionId && sessionIds.includes(leadSessionId)) {
+          lead = leads[0];
+          visitorHasValidData = true;
+        } else {
+          console.log(`[Widget Init] Lead ${leads[0].id} found but its session ${leadSessionId} no longer exists. Treating as new visitor.`);
+        }
       }
     }
+
+    // If the widget sent a visitorId but no valid session or lead exists,
+    // signal the client to reset and start fresh.
+    const shouldResetVisitor = Boolean(visitorId) && !activeSessionId && !visitorHasValidData;
 
     // 4. Fetch widget config welcome message
     const { data: widgetConfig } = await supabase
@@ -94,18 +109,19 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      visitorId: activeVisitorId,
+      visitorId: shouldResetVisitor ? null : activeVisitorId,
       sessionId: activeSessionId,
       greeting,
       history,
+      resetVisitor: shouldResetVisitor,
       profile: lead
         ? {
-            name: lead.name,
-            email: lead.email,
-            phone: lead.phone,
-            status: lead.status,
-            metadata: lead.metadata,
-          }
+          name: lead.name,
+          email: lead.email,
+          phone: lead.phone,
+          status: lead.status,
+          metadata: lead.metadata,
+        }
         : null,
     });
   } catch (error: any) {

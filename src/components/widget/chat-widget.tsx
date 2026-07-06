@@ -58,6 +58,28 @@ export function ChatWidget({ config }: ChatWidgetProps) {
         if (response.ok) {
           const data = await response.json();
           
+          // Backend signals that all data for this visitor was deleted.
+          // Clear stale localStorage and start completely fresh.
+          if (data.resetVisitor) {
+            console.log("[Widget] Backend signaled reset. Clearing stale visitor data.");
+            localStorage.removeItem(visitorKey);
+            localStorage.removeItem(savedSessionKey);
+
+            const freshVisitorId = `visitor_${Math.random().toString(36).substring(2, 15)}`;
+            setVisitorId(freshVisitorId);
+            localStorage.setItem(visitorKey, freshVisitorId);
+            setSessionId(undefined);
+            setMessages([
+              {
+                id: "msg-welcome",
+                role: "assistant",
+                content: data.greeting || greeting,
+                timestamp: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
+              },
+            ]);
+            return;
+          }
+
           setVisitorId(data.visitorId);
           localStorage.setItem(visitorKey, data.visitorId);
 

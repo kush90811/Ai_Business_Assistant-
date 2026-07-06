@@ -34,7 +34,10 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const apiCall = async (message, clientId, sessionId, visitorId) => {
+  await sleep(2500);
   const response = await fetch("http://localhost:3000/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -128,7 +131,7 @@ const runTests = async () => {
     console.log(`- Message: "My name is Paresh"`);
     console.log(`  Bot Reply: "${res.response}"`);
     
-    if (!res.response.includes("I already have your name as Kush") || !res.response.includes("replace it with Paresh")) {
+    if (!res.response.includes("I currently have your name as 'Kush'") || !res.response.includes("update it to 'Paresh'")) {
       throw new Error("Expected bot to ask for confirmation regarding name replacement");
     }
 
@@ -166,7 +169,7 @@ const runTests = async () => {
     console.log(`- Message: "My email is new@gmail.com"`);
     console.log(`  Bot Reply: "${res.response}"`);
 
-    if (!res.response.includes("I already have your email as kush@gmail.com") || !res.response.includes("replace it with new@gmail.com")) {
+    if (!res.response.includes("I currently have your email as 'kush@gmail.com'") || !res.response.includes("update it to 'new@gmail.com'")) {
       throw new Error("Expected bot to ask for confirmation regarding email replacement");
     }
 
