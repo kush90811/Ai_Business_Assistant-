@@ -1,13 +1,14 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+import { z } from "zod";
 
 import { env } from "@/config/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-type OnboardingPayload = {
-  fullName?: string;
-  companyName?: string;
-};
+const OnboardingSchema = z.object({
+  fullName: z.string().max(200).optional(),
+  companyName: z.string().max(200).optional(),
+});
 
 function slugify(value: string) {
   return value
@@ -52,7 +53,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = (await request.json().catch(() => ({}))) as OnboardingPayload;
+  const rawBody = await request.json().catch(() => ({}));
+  const parsed = OnboardingSchema.safeParse(rawBody);
+  // On validation failure, use defaults (same as original behavior — the original
+  // code already had `.catch(() => ({}))`, so invalid payloads resulted in empty defaults)
+  const body = parsed.success ? parsed.data : {};
+
   const fullName = body.fullName?.trim() || user.user_metadata?.full_name || "";
   const companyName = body.companyName?.trim() || fullName || user.email?.split("@")[0] || "New Client";
 

@@ -1,8 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-require-imports */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getCurrentSession } from "@/lib/auth/session";
 import { generateEmbeddings } from "@/lib/embeddings";
+
+const ProcessPayloadSchema = z.object({
+  documentId: z.string().uuid("documentId must be a valid UUID"),
+});
 
 /**
  * Custom CSV parser that turns rows into searchable, semantic strings.
@@ -110,17 +115,23 @@ export async function POST(request: NextRequest) {
 
   const workspaceId = session.tenant.clientId;
   
-  let payload;
+  // 2. Parse and validate payload with zod
+  let rawPayload: unknown;
   try {
-    payload = await request.json();
+    rawPayload = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
 
-  const { documentId } = payload;
-  if (!documentId) {
-    return NextResponse.json({ error: "documentId is required." }, { status: 400 });
+  const parsed = ProcessPayloadSchema.safeParse(rawPayload);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Validation failed.", details: parsed.error.flatten() },
+      { status: 400 }
+    );
   }
+
+  const { documentId } = parsed.data;
 
   try {
     // 2. Fetch the document metadata and verify workspace ownership

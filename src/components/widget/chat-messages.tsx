@@ -4,6 +4,97 @@ import React, { useEffect, useRef } from "react";
 import { Bot, User } from "lucide-react";
 import { LeadCaptureForm } from "./lead-capture-form";
 
+/**
+ * Lightweight Markdown renderer for assistant messages.
+ * Supports: **bold**, *italic*, bullet lists (- or •), numbered lists, and line breaks.
+ * No external dependency needed.
+ */
+function renderMarkdown(text: string): string {
+  // Escape HTML to prevent XSS
+  let html = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  // Bold: **text** or __text__
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/__(.+?)__/g, "<strong>$1</strong>");
+
+  // Italic: *text* or _text_ (but not inside bold markers)
+  html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<em>$1</em>");
+  html = html.replace(/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g, "<em>$1</em>");
+
+  // Process line-by-line for lists
+  const lines = html.split("\n");
+  const processedLines: string[] = [];
+  let inList = false;
+  let listType: "ul" | "ol" | null = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Bullet list items: - item, • item, * item (but not bold markers)
+    const bulletMatch = trimmed.match(/^[-•]\s+(.+)/);
+    // Numbered list items: 1. item, 2) item
+    const numberMatch = trimmed.match(/^\d+[.)]\s+(.+)/);
+
+    if (bulletMatch) {
+      if (!inList || listType !== "ul") {
+        if (inList) processedLines.push(listType === "ol" ? "</ol>" : "</ul>");
+        processedLines.push("<ul>");
+        inList = true;
+        listType = "ul";
+      }
+      processedLines.push(`<li>${bulletMatch[1]}</li>`);
+    } else if (numberMatch) {
+      if (!inList || listType !== "ol") {
+        if (inList) processedLines.push(listType === "ol" ? "</ol>" : "</ul>");
+        processedLines.push("<ol>");
+        inList = true;
+        listType = "ol";
+      }
+      processedLines.push(`<li>${numberMatch[1]}</li>`);
+    } else {
+      if (inList) {
+        processedLines.push(listType === "ol" ? "</ol>" : "</ul>");
+        inList = false;
+        listType = null;
+      }
+      // Empty lines become <br>, non-empty lines stay as-is with <br> at end
+      if (trimmed === "") {
+        processedLines.push("<br/>");
+      } else {
+        processedLines.push(trimmed);
+      }
+    }
+  }
+  if (inList) {
+    processedLines.push(listType === "ol" ? "</ol>" : "</ul>");
+  }
+
+  // Join with <br/> for non-list lines, but not between list items
+  let result = "";
+  for (let i = 0; i < processedLines.length; i++) {
+    const current = processedLines[i];
+    const next = processedLines[i + 1];
+    result += current;
+    // Don't add <br/> after list tags or before list tags
+    if (
+      current && next &&
+      !current.startsWith("<ul") && !current.startsWith("</ul") &&
+      !current.startsWith("<ol") && !current.startsWith("</ol") &&
+      !current.startsWith("<li") &&
+      !next.startsWith("<ul") && !next.startsWith("</ul") &&
+      !next.startsWith("<ol") && !next.startsWith("</ol") &&
+      !next.startsWith("<li") &&
+      current !== "<br/>"
+    ) {
+      result += "<br/>";
+    }
+  }
+
+  return result;
+}
 export interface WidgetMessage {
   id: string;
   role: "user" | "assistant";
@@ -76,14 +167,21 @@ export function ChatMessages({
 
           <div className="space-y-1">
             <div 
-              className={`rounded-2xl px-3.5 py-2.5 leading-relaxed shadow-sm whitespace-pre-wrap ${
+              className={`rounded-2xl px-3.5 py-2.5 leading-relaxed shadow-sm ${
                 isBot 
                   ? "bg-[#161622] text-neutral-200 border border-white/5 rounded-tl-none" 
-                  : "text-white rounded-tr-none"
+                  : "text-white rounded-tr-none whitespace-pre-wrap"
               }`}
               style={!isBot ? { backgroundColor: accentColor } : undefined}
             >
-              {m.content}
+              {isBot ? (
+                <div 
+                  className="widget-markdown"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} 
+                />
+              ) : (
+                m.content
+              )}
             </div>
             <p className={`text-[9px] text-neutral-500 ${isBot ? "text-left" : "text-right"}`}>
               {m.timestamp}

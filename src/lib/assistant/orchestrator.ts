@@ -23,6 +23,7 @@ export class AssistantOrchestrator {
   public static async processMessage(params: OrchestratorParams): Promise<{
     response: string;
     sessionId: string;
+    stage: string;
   }> {
     const { message, clientId, sessionId, visitorId } = params;
     const supabase = createSupabaseServiceClient();
@@ -100,7 +101,7 @@ export class AssistantOrchestrator {
           .update({ last_activity_at: new Date().toISOString() })
           .eq("id", sessionId);
 
-        return { response: responseText, sessionId };
+        return { response: responseText, sessionId, stage: "greeting" };
       } else if (classification === "no") {
         const newMetadata = { ...existingLead.metadata };
         delete newMetadata.pending_confirmation;
@@ -124,7 +125,7 @@ export class AssistantOrchestrator {
           .update({ last_activity_at: new Date().toISOString() })
           .eq("id", sessionId);
 
-        return { response: responseText, sessionId };
+        return { response: responseText, sessionId, stage: "greeting" };
       } else {
         // Unrelated input: clear pending state and proceed to standard execution
         console.log("[Orchestrator] Input unrelated to confirmation. Clearing pending state.");
@@ -229,7 +230,7 @@ export class AssistantOrchestrator {
           .update({ last_activity_at: new Date().toISOString() })
           .eq("id", sessionId);
 
-        return { response: conflictResponse, sessionId };
+        return { response: conflictResponse, sessionId, stage: "greeting" };
       }
 
       // If no conflict and updates exist, apply enrichment
@@ -327,7 +328,7 @@ export class AssistantOrchestrator {
         ragContext = chunks.map((c: any) => c.chunk_text).join("\n\n");
       }
     } catch (err) {
-      console.warn("[Orchestrator] Vector search failed:", err);
+      console.warn("[Orchestrator] ⚠️ RAG CONTEXT UNAVAILABLE: Vector search failed. The assistant will respond WITHOUT knowledge base context for this message. Error:", err);
     }
 
     // 10. Mode-specific guidelines
@@ -408,7 +409,7 @@ export class AssistantOrchestrator {
       .update({ last_activity_at: new Date().toISOString() })
       .eq("id", sessionId);
 
-    return { response: assistantReply, sessionId };
+    return { response: assistantReply, sessionId, stage: stageMetadata.currentStage };
   }
 
   /**
@@ -489,7 +490,7 @@ Respond with a single JSON object matching this schema (no markdown formatting, 
           { role: "system", content: systemPrompt },
           { role: "user", content: userContent },
         ],
-        { temperature: 0.1 }
+        { temperature: 0.1, maxTokens: 800 }
       );
 
       const jsonStart = response.indexOf("{");

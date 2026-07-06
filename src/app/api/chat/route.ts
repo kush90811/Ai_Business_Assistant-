@@ -1,41 +1,68 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { AssistantOrchestrator } from "@/lib/assistant/orchestrator";
+import { checkRateLimit, buildRateLimitKey } from "@/lib/rate-limit";
+import { checkAllowedDomain } from "@/lib/domain-check";
 
-type ChatRequestPayload = {
-  message: string;
-  clientId?: string;
-  sessionId?: string;
-  visitorId?: string;
-};
+const ChatPayloadSchema = z.object({
+  message: z.string().min(1, "Message is required").max(5000),
+  clientId: z.string().uuid().optional(),
+  sessionId: z.string().uuid().optional(),
+  visitorId: z.string().max(200).optional(),
+});
 
 export async function POST(request: Request) {
   try {
-    let payload: ChatRequestPayload;
+    // 0. Parse and validate payload
+    let rawPayload: unknown;
     try {
-      payload = await request.json();
+      rawPayload = await request.json();
     } catch {
-      console.log("[API Return] 400 - Invalid JSON payload.");
       return NextResponse.json({ error: "Invalid JSON payload." }, { status: 400 });
     }
 
-    const { message, clientId, sessionId, visitorId } = payload;
+    const parsed = ChatPayloadSchema.safeParse(rawPayload);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Validation failed.", details: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const { message, clientId, sessionId, visitorId } = parsed.data;
 
     console.log(`[API] Received visitorId: ${visitorId}, sessionId: ${sessionId}, clientId: ${clientId}`);
 
-    if (!message || typeof message !== "string" || message.trim() === "") {
-      console.log("[API Return] 400 - Message is required.");
-      return NextResponse.json({ error: "Message is required." }, { status: 400 });
+    // 1. Rate limiting — 20 req/min per clientId+IP
+    const rlKey = buildRateLimitKey(request, clientId);
+    const rlResult = checkRateLimit(rlKey, 20);
+    if (!rlResult.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests. Please try again shortly." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(Math.ceil((rlResult.retryAfterMs || 60000) / 1000)) },
+        }
+      );
     }
 
     const supabase = createSupabaseServiceClient();
+
+    // 2. Domain enforcement
+    if (clientId) {
+      const domainResult = await checkAllowedDomain(request, clientId, supabase);
+      if (!domainResult.allowed) {
+        return NextResponse.json({ error: domainResult.reason }, { status: 403 });
+      }
+    }
+
+    // 3. Session verification & resolution
     let activeSessionId = sessionId;
     let activeClientId = clientId;
 
-    // 1. Session verification & resolution
     if (activeSessionId) {
-      // Load session to get the associated clientId and metadata
       const { data: session } = await supabase
         .from("chat_sessions")
         .select("client_id, metadata")
@@ -45,7 +72,6 @@ export async function POST(request: Request) {
       if (session) {
         activeClientId = session.client_id;
 
-        // If the session was associated with a lead, verify that the lead still exists in the database
         const leadId = session.metadata?.lead_id;
         if (leadId) {
           const { data: leadCheck } = await supabase
@@ -66,16 +92,13 @@ export async function POST(request: Request) {
     }
 
     if (!activeSessionId) {
-      // If no session exists (or was stale), we must have a clientId to start a new one
       if (!activeClientId) {
-        console.log("[API Return] 400 - clientId is required to start a new chat session.");
         return NextResponse.json(
           { error: "clientId is required to start a new chat session." },
           { status: 400 }
         );
       }
 
-      // Verify the client exists
       const { data: client, error: clientError } = await supabase
         .from("clients")
         .select("id")
@@ -83,14 +106,9 @@ export async function POST(request: Request) {
         .maybeSingle();
 
       if (clientError || !client) {
-        console.log(`[API Return] 404 - Client not found. activeClientId: ${activeClientId}`);
-        return NextResponse.json(
-          { error: "Client not found." },
-          { status: 404 }
-        );
+        return NextResponse.json({ error: "Client not found." }, { status: 404 });
       }
 
-      // Create new chat session
       const { data: newSession, error: createSessionError } = await supabase
         .from("chat_sessions")
         .insert({
@@ -102,7 +120,6 @@ export async function POST(request: Request) {
         .single();
 
       if (createSessionError || !newSession) {
-        console.log(`[API Return] 500 - Failed to create chat session: ${createSessionError?.message}`);
         return NextResponse.json(
           { error: `Failed to create chat session: ${createSessionError?.message}` },
           { status: 500 }
@@ -113,13 +130,11 @@ export async function POST(request: Request) {
       console.log(`[API] Created new chat session: ${activeSessionId} for client: ${activeClientId}`);
     }
 
-    // Double check we have a valid clientId and sessionId
     if (!activeClientId || !activeSessionId) {
-      console.log("[API Return] 500 - Failed to resolve tenant context.");
       return NextResponse.json({ error: "Failed to resolve tenant context." }, { status: 500 });
     }
 
-    // 2. Insert the user's message
+    // 4. Insert the user's message
     const { error: userMsgError } = await supabase.from("chat_messages").insert({
       client_id: activeClientId,
       session_id: activeSessionId,
@@ -128,14 +143,13 @@ export async function POST(request: Request) {
     });
 
     if (userMsgError) {
-      console.log(`[API Return] 500 - Failed to store user message: ${userMsgError.message}`);
       return NextResponse.json(
         { error: `Failed to store user message: ${userMsgError.message}` },
         { status: 500 }
       );
     }
 
-    // 3. Process using AssistantOrchestrator
+    // 5. Process using AssistantOrchestrator
     try {
       const orchestratorResult = await AssistantOrchestrator.processMessage({
         message: message.trim(),
@@ -148,6 +162,7 @@ export async function POST(request: Request) {
       return NextResponse.json({
         response: orchestratorResult.response,
         sessionId: orchestratorResult.sessionId,
+        stage: orchestratorResult.stage,
       });
     } catch (orchestratorError: any) {
       console.error("[API Return] 500 - Assistant Orchestrator failed:", orchestratorError);

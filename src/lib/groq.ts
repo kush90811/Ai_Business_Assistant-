@@ -30,7 +30,10 @@ async function executeCompletionRequest(
   retryCount = 0
 ): Promise<string> {
   const temperature = options?.temperature ?? 0.7;
-  const maxTokens = options?.maxTokens;
+  // Apply a default max_tokens for conversational replies to prevent overly long responses.
+  // JSON-extraction calls (analyzeInput, classification) pass their own maxTokens explicitly,
+  // so this default only applies to the main chat completion path.
+  const maxTokens = options?.maxTokens ?? 400;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);

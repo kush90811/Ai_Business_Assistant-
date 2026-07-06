@@ -1,27 +1,65 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { checkRateLimit, buildRateLimitKey } from "@/lib/rate-limit";
+import { checkAllowedDomain } from "@/lib/domain-check";
 import crypto from "crypto";
+
+const InitPayloadSchema = z.object({
+  clientId: z.string().uuid("clientId must be a valid UUID"),
+  visitorId: z.string().max(200).optional(),
+  sessionId: z.string().uuid().optional(),
+});
 
 export async function POST(request: Request) {
   try {
-    const payload = await request.json();
-    const { clientId, visitorId, sessionId } = payload;
+    // 0. Parse and validate payload
+    let rawPayload: unknown;
+    try {
+      rawPayload = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON payload." }, { status: 400 });
+    }
 
-    if (!clientId) {
-      return NextResponse.json({ error: "clientId is required" }, { status: 400 });
+    const parsed = InitPayloadSchema.safeParse(rawPayload);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Validation failed.", details: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const { clientId, visitorId, sessionId } = parsed.data;
+
+    // 1. Rate limiting — 60 req/min
+    const rlKey = buildRateLimitKey(request, clientId);
+    const rlResult = checkRateLimit(rlKey, 60);
+    if (!rlResult.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests. Please try again shortly." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(Math.ceil((rlResult.retryAfterMs || 60000) / 1000)) },
+        }
+      );
     }
 
     const supabase = createSupabaseServiceClient();
 
-    // 1. Resolve or generate visitorId
+    // 2. Domain enforcement
+    const domainResult = await checkAllowedDomain(request, clientId, supabase);
+    if (!domainResult.allowed) {
+      return NextResponse.json({ error: domainResult.reason }, { status: 403 });
+    }
+
+    // 3. Resolve or generate visitorId
     const activeVisitorId = visitorId || `visitor_${crypto.randomUUID()}`;
 
-    // 2. Resolve sessionId and load history if valid
+    // 4. Resolve sessionId and load history if valid
     let activeSessionId = sessionId || null;
     let history = null;
 
     if (activeSessionId) {
-      // Check if session exists and belongs to this client
       const { data: session } = await supabase
         .from("chat_sessions")
         .select("id")
@@ -30,7 +68,6 @@ export async function POST(request: Request) {
         .maybeSingle();
 
       if (session) {
-        // Load history for this session
         const { data: messages, error: messagesError } = await supabase
           .from("chat_messages")
           .select("id, role, content, created_at")
@@ -49,14 +86,11 @@ export async function POST(request: Request) {
           }));
         }
       } else {
-        // Clear stale session
         activeSessionId = null;
       }
     }
 
-    // 3. Find known visitor profile (lead) — with coherence validation
-    //    Only return a profile if the lead's linked session ALSO still exists.
-    //    This ensures deleted sessions/leads never produce stale profiles.
+    // 5. Find known visitor profile (lead) — with coherence validation
     let lead = null;
     let visitorHasValidData = false;
 
@@ -76,7 +110,6 @@ export async function POST(request: Request) {
         .limit(1);
 
       if (leads && leads.length > 0) {
-        // Verify that the lead's linked session still exists
         const leadSessionId = leads[0].session_id;
         if (leadSessionId && sessionIds.includes(leadSessionId)) {
           lead = leads[0];
@@ -87,21 +120,19 @@ export async function POST(request: Request) {
       }
     }
 
-    // If the widget sent a visitorId but no valid session or lead exists,
-    // signal the client to reset and start fresh.
     const shouldResetVisitor = Boolean(visitorId) && !activeSessionId && !visitorHasValidData;
 
-    // 4. Fetch widget config welcome message
+    // 6. Fetch widget config welcome message
     const { data: widgetConfig } = await supabase
       .from("widget_configs")
       .select("welcome_message")
       .eq("client_id", clientId)
       .maybeSingle();
 
-    const defaultGreeting = "Hello! I am your AI assistant. Ask me anything about our products or plans.";
+    const defaultGreeting = "Hi there! 👋 Welcome — I'm your AI assistant, and I'm here to help you explore how AI can transform your business. Whether you're looking for chatbots, workflow automation, or custom solutions, I've got you covered. What kind of business do you run?";
     const baseWelcome = widgetConfig?.welcome_message || defaultGreeting;
 
-    // 5. Personalize greeting if returning visitor is known
+    // 7. Personalize greeting if returning visitor is known
     let greeting = baseWelcome;
     if (lead && lead.name && lead.name !== "Anonymous Visitor" && lead.name.trim() !== "") {
       greeting = `Welcome back, ${lead.name.trim()}! ${baseWelcome}`;

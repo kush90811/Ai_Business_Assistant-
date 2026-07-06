@@ -1,23 +1,36 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
 import { getCurrentSession } from "@/lib/auth/session";
 import { generateEmbedding } from "@/lib/embeddings";
+import { checkRateLimit, buildRateLimitKey } from "@/lib/rate-limit";
+import { checkAllowedDomain } from "@/lib/domain-check";
+
+const SearchPayloadSchema = z.object({
+  query: z.string().min(1, "Query is required").max(2000),
+  workspaceId: z.string().uuid().optional(),
+});
 
 export async function POST(request: NextRequest) {
   try {
-    let payload;
+    // 0. Parse and validate payload
+    let rawPayload: unknown;
     try {
-      payload = await request.json();
+      rawPayload = await request.json();
     } catch {
       return NextResponse.json({ error: "Invalid JSON payload." }, { status: 400 });
     }
 
-    const { query, workspaceId } = payload;
-
-    if (!query || typeof query !== "string" || query.trim() === "") {
-      return NextResponse.json({ error: "Query is required and must be a string." }, { status: 400 });
+    const parsed = SearchPayloadSchema.safeParse(rawPayload);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Validation failed.", details: parsed.error.flatten() },
+        { status: 400 }
+      );
     }
+
+    const { query, workspaceId } = parsed.data;
 
     // Authenticate session if available (dashboard users)
     const session = await getCurrentSession();
@@ -35,9 +48,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "workspaceId is required." }, { status: 400 });
     }
 
+    // 1. Rate limiting — 60 req/min
+    const rlKey = buildRateLimitKey(request, targetWorkspaceId);
+    const rlResult = checkRateLimit(rlKey, 60);
+    if (!rlResult.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests. Please try again shortly." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(Math.ceil((rlResult.retryAfterMs || 60000) / 1000)) },
+        }
+      );
+    }
+
     const supabase = createSupabaseServiceClient();
 
-    // Verify workspace (client) exists
+    // 2. Domain enforcement (only for non-authenticated requests)
+    if (!session) {
+      const domainResult = await checkAllowedDomain(request, targetWorkspaceId, supabase);
+      if (!domainResult.allowed) {
+        return NextResponse.json({ error: domainResult.reason }, { status: 403 });
+      }
+    }
+
+    // 3. Verify workspace (client) exists
     const { data: client, error: clientError } = await supabase
       .from("clients")
       .select("id")
@@ -48,16 +82,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Workspace client not found." }, { status: 404 });
     }
 
-    // 1. Generate query embedding vector
+    // 4. Generate query embedding vector
     console.log(`[RAG Search] Generating embedding for: "${query}"`);
     const queryEmbedding = await generateEmbedding(query.trim());
 
-    // 2. Perform Cosine Similarity search in pgvector using the match_chunks RPC function
+    // 5. Perform Cosine Similarity search in pgvector using the match_chunks RPC function
     console.log(`[RAG Search] Running pgvector match_chunks RPC for workspace: ${targetWorkspaceId}`);
     const { data: chunks, error: matchError } = await supabase.rpc("match_chunks", {
       query_embedding: queryEmbedding,
-      match_threshold: 0.3, // Minimum cosine similarity score threshold (0.3 is standard)
-      match_count: 5,        // Top 5 chunks
+      match_threshold: 0.3,
+      match_count: 5,
       filter_workspace_id: targetWorkspaceId,
     });
 

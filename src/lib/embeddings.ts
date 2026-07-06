@@ -1,9 +1,39 @@
 import { env } from "@/config/env";
 
+// Track whether we've already checked Ollama reachability
+let ollamaReachabilityChecked = false;
+
+/**
+ * One-time check to verify Ollama is reachable. Logs a clear warning if not.
+ */
+async function checkOllamaReachability(): Promise<void> {
+  if (ollamaReachabilityChecked) return;
+  ollamaReachabilityChecked = true;
+
+  const ollamaHost = env.ollamaHost;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`${ollamaHost}/api/tags`, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      console.log(`[Ollama] ✓ Ollama is reachable at ${ollamaHost}`);
+    } else {
+      console.warn(`[Ollama] ⚠️ WARNING: Ollama returned status ${res.status} at ${ollamaHost}. RAG context will be unavailable — the assistant will answer generically without knowledge base data.`);
+    }
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.warn(`[Ollama] ⚠️ WARNING: Ollama is NOT reachable at ${ollamaHost} (${errMsg}). RAG context will be unavailable — the assistant will answer generically without knowledge base data. Start Ollama to enable knowledge base search.`);
+  }
+}
+
 /**
  * Generates a single vector embedding for a query string using local Ollama.
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
+  // Check reachability on first use
+  await checkOllamaReachability();
+
   console.log(`[Ollama Embeddings] generateEmbedding called for text of length ${text.length} characters.`);
   
   const ollamaHost = env.ollamaHost;
@@ -34,7 +64,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     return embedding;
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.error(`[Ollama Embeddings Error] Failed to generate embedding: ${errMsg}`);
+    console.warn(`[Ollama] ⚠️ EMBEDDING FAILED: ${errMsg}. This means RAG context is MISSING for this query — the assistant will respond without knowledge base data.`);
     throw err;
   }
 }

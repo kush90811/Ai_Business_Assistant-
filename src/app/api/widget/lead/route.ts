@@ -1,30 +1,69 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { createSupabaseServiceClient } from "@/lib/supabase/service";
+import { checkRateLimit, buildRateLimitKey } from "@/lib/rate-limit";
+import { checkAllowedDomain } from "@/lib/domain-check";
+
+const LeadPayloadSchema = z.object({
+  clientId: z.string().uuid("clientId must be a valid UUID"),
+  sessionId: z.string().uuid().optional(),
+  name: z.string().max(200).optional(),
+  email: z.string().email("Invalid email format").optional().or(z.literal("")),
+  phone: z.string().max(30).optional().or(z.literal("")),
+  source: z.string().max(100).optional(),
+}).refine(
+  (data) => (data.email && data.email !== "") || (data.phone && data.phone !== ""),
+  { message: "Please provide at least an email or phone number.", path: ["email"] }
+);
 
 export async function POST(request: Request) {
   console.log("[API /api/widget/lead] Incoming request reached");
   try {
-    const payload = await request.json();
-    console.log("[API /api/widget/lead] Payload:", JSON.stringify(payload));
-
-    const { clientId, sessionId, name, email, phone, source } = payload;
-
-    // Validation
-    if (!clientId) {
-      console.log("[API /api/widget/lead] Validation failed: clientId is missing");
-      return NextResponse.json({ error: "clientId is required" }, { status: 400 });
+    // 0. Parse and validate payload
+    let rawPayload: unknown;
+    try {
+      rawPayload = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON payload." }, { status: 400 });
     }
 
-    if (!email && !phone) {
-      console.log("[API /api/widget/lead] Validation failed: email and phone are both missing");
-      return NextResponse.json({ error: "Please provide at least an email or phone number." }, { status: 400 });
+    console.log("[API /api/widget/lead] Payload:", JSON.stringify(rawPayload));
+
+    const parsed = LeadPayloadSchema.safeParse(rawPayload);
+    if (!parsed.success) {
+      console.log("[API /api/widget/lead] Validation failed:", parsed.error.flatten());
+      return NextResponse.json(
+        { error: "Validation failed.", details: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const { clientId, sessionId, name, email, phone, source } = parsed.data;
+
+    // 1. Rate limiting — 60 req/min
+    const rlKey = buildRateLimitKey(request, clientId);
+    const rlResult = checkRateLimit(rlKey, 60);
+    if (!rlResult.allowed) {
+      return NextResponse.json(
+        { error: "Too many requests. Please try again shortly." },
+        {
+          status: 429,
+          headers: { "Retry-After": String(Math.ceil((rlResult.retryAfterMs || 60000) / 1000)) },
+        }
+      );
+    }
+
+    const supabase = createSupabaseServiceClient();
+
+    // 2. Domain enforcement
+    const domainResult = await checkAllowedDomain(request, clientId, supabase);
+    if (!domainResult.allowed) {
+      return NextResponse.json({ error: domainResult.reason }, { status: 403 });
     }
 
     console.log("[API /api/widget/lead] Validation passed");
 
-    const supabase = createSupabaseServiceClient();
-
-    // Check if a lead already exists for this session
+    // 3. Check if a lead already exists for this session
     let existingLead = null;
     if (sessionId) {
       const { data: leads, error: fetchError } = await supabase

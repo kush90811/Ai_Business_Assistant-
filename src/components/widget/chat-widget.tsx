@@ -143,22 +143,8 @@ export function ChatWidget({ config }: ChatWidgetProps) {
     setIsTyping(true);
     setShowQuickActions(false);
 
-    // 2. Local Intent Detection for Lead Capture
-    const lowerText = text.toLowerCase();
-    const showsBuyingIntent = 
-      lowerText.includes("demo") || 
-      lowerText.includes("pricing") || 
-      lowerText.includes("cost") || 
-      lowerText.includes("buy") || 
-      lowerText.includes("pricing plan") ||
-      lowerText.includes("quote") ||
-      lowerText.includes("sales") || 
-      lowerText.includes("callback") ||
-      lowerText.includes("contact information") || 
-      lowerText.includes("leave contact");
-
     try {
-      // 3. Send message to backend /api/chat
+      // 2. Send message to backend /api/chat
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -183,7 +169,7 @@ export function ChatWidget({ config }: ChatWidgetProps) {
         localStorage.setItem(`chatbot_session_${clientId}`, data.sessionId);
       }
 
-      // 4. Append Assistant Response
+      // 3. Append Assistant Response
       const assistantMsg: WidgetMessage = {
         id: `msg-assistant-${Date.now()}`,
         role: "assistant",
@@ -193,8 +179,13 @@ export function ChatWidget({ config }: ChatWidgetProps) {
 
       setMessages((prev) => [...prev, assistantMsg]);
 
-      // 5. If user showed buying intent, inject Lead Capture Form card after the AI reply
-      if (showsBuyingIntent) {
+      // 4. Show Lead Capture Form only when backend stage is "demo_booking"
+      //    or user explicitly asked to leave contact info — NOT from keyword matching.
+      const lowerText = text.toLowerCase();
+      const explicitContactRequest = lowerText.includes("leave contact") || lowerText.includes("contact information");
+      const isAtDemoStage = data.stage === "demo_booking";
+      
+      if (isAtDemoStage || explicitContactRequest) {
         setTimeout(() => {
           const formCard: WidgetMessage = {
             id: `msg-leadform-${Date.now()}`,
