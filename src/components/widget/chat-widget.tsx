@@ -260,6 +260,7 @@ export function ChatWidget({ config }: ChatWidgetProps) {
             messages={messages}
             isTyping={isTyping}
             accentColor={accentColor}
+            logoUrl={logoUrl}
             clientId={clientId}
             sessionId={sessionId}
             onLeadSubmitSuccess={handleLeadSubmitSuccess}
@@ -271,6 +272,16 @@ export function ChatWidget({ config }: ChatWidgetProps) {
             disabled={isTyping}
             accentColor={accentColor}
           />
+          <div className="bg-[#09090b] pb-2 pt-0.5 text-center border-t border-white/[0.02]">
+            <a 
+              href="https://tarkshy.com" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="text-[10px] text-neutral-500 hover:text-indigo-400 transition-colors font-sans flex items-center justify-center gap-1 cursor-pointer select-none"
+            >
+              Powered by <span className="font-bold text-neutral-400">Tarkshy Consultancy Services</span>
+            </a>
+          </div>
         </div>
       )}
 

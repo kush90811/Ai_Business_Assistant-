@@ -140,4 +140,80 @@ h6 {
 .widget-markdown li {
   margin-bottom: 0.2em;
 }
+
+/* ============================================================================
+   Light Theme System & Overrides
+   ============================================================================ */
+html.light {
+  color-scheme: light;
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 3.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 3.9%;
+  --primary: 240 5.9% 10%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 240 4.8% 95.9%;
+  --secondary-foreground: 240 5.9% 10%;
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+  --accent: 240 4.8% 95.9%;
+  --accent-foreground: 240 5.9% 10%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --ring: 240 5.9% 10%;
+}
+
+/* Redefine body background for light mode */
+html.light body {
+  background: radial-gradient(circle at 50% 0%, hsl(240 20% 97%) 0%, hsl(var(--background)) 70%);
+  color: hsl(var(--foreground));
+}
+
+/* Override dark hex backgrounds in light mode */
+html.light .bg-\[\#09090b\] { background-color: hsl(var(--background)) !important; }
+html.light .bg-\[\#09090b\]\/40 { background-color: hsl(var(--card) / 0.4) !important; }
+html.light .bg-\[\#09090b\]\/60 { background-color: hsl(var(--card) / 0.6) !important; }
+html.light .bg-\[\#09090b\]\/80 { background-color: hsl(var(--card) / 0.8) !important; }
+html.light .bg-\[\#121217\] { background-color: hsl(var(--muted) / 0.6) !important; }
+html.light .bg-\[\#161622\] { background-color: hsl(var(--card)) !important; }
+html.light .bg-\[\#0f0f13\] { background-color: hsl(var(--card)) !important; }
+html.light .bg-\[\#0f0f13\]\/40 { background-color: hsl(var(--card) / 0.4) !important; }
+html.light .bg-\[\#121217\]\/60 { background-color: hsl(var(--muted) / 0.4) !important; }
+
+/* Override hardcoded border colors in light mode */
+html.light .border-white\/5 { border-color: hsl(var(--border)) !important; }
+html.light .border-white\/10 { border-color: hsl(var(--border)) !important; }
+html.light .border-border\/40 { border-color: hsl(var(--border) / 0.4) !important; }
+html.light .border-border\/60 { border-color: hsl(var(--border) / 0.6) !important; }
+
+/* Text colors in light mode */
+html.light h1, 
+html.light h2, 
+html.light h3, 
+html.light h4, 
+html.light h5, 
+html.light h6,
+html.light .text-white { 
+  color: hsl(var(--foreground)) !important; 
+}
+
+/* Exception: maintain white text inside primary buttons and badges */
+html.light button.bg-indigo-600,
+html.light button.bg-indigo-600 *,
+html.light .bg-indigo-500,
+html.light .bg-indigo-500 *,
+html.light .bg-indigo-600,
+html.light .bg-indigo-600 * {
+  color: #ffffff !important;
+}
+
+/* Glassmorphism adjustment for light mode */
+html.light .glass {
+  background: rgba(255, 255, 255, 0.4) !important;
+  border-color: rgba(0, 0, 0, 0.05) !important;
+}
 

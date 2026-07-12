@@ -20,7 +20,7 @@ CREATE POLICY "client_users_select_own"
   USING (user_id = auth.uid());
 
 -- ============================================================================
--- 2. clients — user can only see clients they belong to
+-- 2. clients — user can only see and update clients they belong to
 -- ============================================================================
 ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
 
@@ -28,6 +28,16 @@ CREATE POLICY "clients_select_member"
   ON public.clients
   FOR SELECT
   USING (
+    id IN (SELECT client_id FROM public.client_users WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "clients_update_member"
+  ON public.clients
+  FOR UPDATE
+  USING (
+    id IN (SELECT client_id FROM public.client_users WHERE user_id = auth.uid())
+  )
+  WITH CHECK (
     id IN (SELECT client_id FROM public.client_users WHERE user_id = auth.uid())
   );
 

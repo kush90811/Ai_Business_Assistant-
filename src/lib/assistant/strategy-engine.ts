@@ -324,6 +324,8 @@ Good response: "No worries — let's get that sorted! Could you tell me which of
     ragContext: string;
     modeInstructions: string;
     recommendationInstructions: string;
+    responseLength?: "short" | "medium" | "detailed";
+    businessProfileContext?: string;
   }): string {
     const {
       brandName,
@@ -334,7 +336,22 @@ Good response: "No worries — let's get that sorted! Could you tell me which of
       ragContext,
       modeInstructions,
       recommendationInstructions,
+      responseLength = "medium",
+      businessProfileContext = "",
     } = params;
+
+    let lengthRule = `2. RESPONSE LENGTH (by conversation stage):
+   - Greeting: 2–4 lines. Warm, brief, inviting.
+   - Business/pain-point discovery: 3–5 lines. Show understanding, then ask.
+   - Recommendation: 4–6 lines. Explain value, then suggest next step.
+   - Support: Short and focused. Step-by-step.
+   - Technical issue: Very short. Direct troubleshooting only.`;
+
+    if (responseLength === "short") {
+      lengthRule = `2. RESPONSE LENGTH (STRICTLY SHORT): Keep your response extremely brief, snappy, and to the point. Max 2 sentences (or 1-2 short paragraphs of 1 sentence each). Do not write more than 40-50 words total. Be very concise and do not elaborate.`;
+    } else if (responseLength === "detailed") {
+      lengthRule = `2. RESPONSE LENGTH (DETAILED): Provide a detailed, comprehensive, and thorough response. Explain concepts fully, provide background context/examples, and explain value deeply before guiding the user. You can write 2-3 detailed paragraphs, up to 150-200 words.`;
+    }
 
     let prompt = `You are ${brandName}'s AI Business Assistant — a warm, professional, and confident virtual sales executive and customer support specialist.
 
@@ -347,12 +364,7 @@ You are NOT a simple Q&A chatbot. You are a skilled conversationalist who builds
 
 === Response Rules (STRICT) ===
 1. ACKNOWLEDGE FIRST: Before asking your next question, briefly react to what the visitor just told you — connect it to something specific and relevant about their business or situation. Never jump straight from their answer to your next question with no acknowledgment in between.
-2. RESPONSE LENGTH (by conversation stage):
-   - Greeting: 2–4 lines. Warm, brief, inviting.
-   - Business/pain-point discovery: 3–5 lines. Show understanding, then ask.
-   - Recommendation: 4–6 lines. Explain value, then suggest next step.
-   - Support: Short and focused. Step-by-step.
-   - Technical issue: Very short. Direct troubleshooting only.
+${lengthRule}
 3. ONE QUESTION RULE: End your response with exactly ONE forward-moving follow-up question that advances the conversation to the next stage. Never ask multiple questions at once. Never end with a generic "anything else?" — always ask something specific and relevant.
 4. LANGUAGE: Respond in the EXACT same language the visitor uses (English, Hindi, Hinglish). NEVER prefix your response with "Translation:" or any translation labels or notes. Just respond naturally and directly in their language.
 5. MEMORY AWARENESS: Never ask for information that is already in the Visitor Profile below. Never repeat questions that were already asked in the conversation history. If you know the visitor's name, use it naturally.
@@ -367,6 +379,10 @@ You are NOT a simple Q&A chatbot. You are a skilled conversationalist who builds
       stageMetadata.currentGoal,
       stageMetadata.pendingFields
     );
+
+    if (businessProfileContext) {
+      prompt += `\n\n${businessProfileContext}`;
+    }
 
     if (memoryContext) {
       prompt += `\n\n${memoryContext}`;

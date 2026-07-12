@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from "react";
 import { Bot, User } from "lucide-react";
 import { LeadCaptureForm } from "./lead-capture-form";
+import { getDirectImageUrl } from "@/lib/utils";
 
 /**
  * Lightweight Markdown renderer for assistant messages.
@@ -107,6 +108,7 @@ interface ChatMessagesProps {
   messages: WidgetMessage[];
   isTyping?: boolean;
   accentColor: string;
+  logoUrl?: string;
   clientId: string;
   sessionId?: string;
   onLeadSubmitSuccess: (details: { name: string; email: string; phone: string }) => void;
@@ -118,6 +120,7 @@ export function ChatMessages({
   messages,
   isTyping,
   accentColor,
+  logoUrl,
   clientId,
   sessionId,
   onLeadSubmitSuccess,
@@ -155,14 +158,27 @@ export function ChatMessages({
               isBot ? "mr-auto" : "ml-auto flex-row-reverse"
             }`}
           >
-            <div className={`h-6 w-6 rounded-full border flex items-center justify-center shrink-0 ${
+            <div className={`h-6 w-6 rounded-full border flex items-center justify-center shrink-0 overflow-hidden ${
               isBot 
                 ? "bg-indigo-950 border-indigo-500/20 text-indigo-400" 
                 : "bg-neutral-800 border-neutral-700 text-neutral-300"
             }`}
             style={isBot ? { borderColor: `${accentColor}30`, color: accentColor } : undefined}
           >
-            {isBot ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+            {isBot ? (
+              getDirectImageUrl(logoUrl) ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img 
+                  src={getDirectImageUrl(logoUrl)} 
+                  alt="Bot Logo" 
+                  className="h-full w-full object-cover" 
+                />
+              ) : (
+                <Bot className="h-3.5 w-3.5" />
+              )
+            ) : (
+              <User className="h-3.5 w-3.5" />
+            )}
           </div>
 
           <div className="space-y-1">

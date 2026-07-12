@@ -357,16 +357,51 @@ export class AssistantOrchestrator {
     // 13. Compile visitor details memory
     const memoryContext = MemoryEngine.getKnownInfoPromptString(profile);
 
-    // 14. Fetch widget config details (for brand name)
+    // 14. Fetch widget config details (for brand name and response length)
     const { data: widgetConfig } = await supabase
       .from("widget_configs")
-      .select("brand_name")
+      .select("brand_name, response_length")
       .eq("client_id", clientId)
       .maybeSingle();
 
     const brandName = widgetConfig?.brand_name || "our business";
+    const responseLength = (widgetConfig?.response_length || "medium") as "short" | "medium" | "detailed";
 
-    // 15. Build System Prompt (stage-aware)
+    // Map response length to token count
+    let maxTokens = 400;
+    if (responseLength === "short") {
+      maxTokens = 150;
+    } else if (responseLength === "detailed") {
+      maxTokens = 800;
+    }
+
+    // 14b. Fetch Business Profile details
+    const { data: businessProfile } = await supabase
+      .from("business_profiles")
+      .select("*")
+      .eq("client_id", clientId)
+      .maybeSingle();
+
+    let businessProfileContext = "";
+    if (businessProfile) {
+      const social = businessProfile.social_links || {};
+      const socialLines: string[] = [];
+      if (social.twitter) socialLines.push(`Twitter/X: ${social.twitter}`);
+      if (social.facebook) socialLines.push(`Facebook: ${social.facebook}`);
+      if (social.linkedin) socialLines.push(`LinkedIn: ${social.linkedin}`);
+      if (social.instagram) socialLines.push(`Instagram: ${social.instagram}`);
+
+      businessProfileContext = `=== Business Profile (CRITICAL: Use these details directly to answer questions about the company, location, contact, hours, or socials. NEVER make up or guess these details) ===
+- Company Name: ${brandName}
+- Description: ${businessProfile.description || "N/A"}
+- Address: ${businessProfile.address || "N/A"}
+- Phone: ${businessProfile.phone || "N/A"}
+- Email: ${businessProfile.email || "N/A"}
+- Website: ${businessProfile.website || "N/A"}
+- Working Hours: ${businessProfile.working_hours || "N/A"}${socialLines.length > 0 ? `\n- Social Links:\n  ${socialLines.map(s => `• ${s}`).join("\n  ")}` : ""}`;
+    }
+
+    // 15. Build System Prompt (stage-aware, length-aware, and business-profile-aware)
     const systemPrompt = StrategyEngine.buildSystemPrompt({
       brandName,
       mode: newMode,
@@ -376,9 +411,11 @@ export class AssistantOrchestrator {
       ragContext,
       modeInstructions,
       recommendationInstructions,
+      responseLength,
+      businessProfileContext,
     });
 
-    // 14. Query Groq
+    // 16. Query Groq
     const formattedMessages: ChatMessage[] = [
       { role: "system", content: systemPrompt },
       ...messageHistory.map((m) => ({
@@ -389,7 +426,7 @@ export class AssistantOrchestrator {
 
     let assistantReply = "";
     try {
-      assistantReply = await getGroqChatCompletion(formattedMessages);
+      assistantReply = await getGroqChatCompletion(formattedMessages, { maxTokens });
     } catch (err) {
       console.error("[Orchestrator] Groq invocation failed:", err);
       assistantReply = `Thank you for reaching out. I'm having a connection issue, but how else can I help?`;

@@ -2,6 +2,7 @@
 
 import React from "react";
 import { X, Sparkles } from "lucide-react";
+import { getDirectImageUrl } from "@/lib/utils";
 
 interface ChatHeaderProps {
   companyName: string;
@@ -17,10 +18,10 @@ export function ChatHeader({ companyName, logoUrl, accentColor, onClose }: ChatH
       style={{ backgroundColor: accentColor }}
     >
       <div className="flex items-center gap-3">
-        {logoUrl ? (
+        {getDirectImageUrl(logoUrl) ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img 
-            src={logoUrl} 
+            src={getDirectImageUrl(logoUrl)} 
             alt={companyName} 
             className="h-8 w-8 rounded-full border border-white/10 object-cover bg-neutral-900"
           />

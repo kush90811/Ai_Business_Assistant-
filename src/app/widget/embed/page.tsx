@@ -26,7 +26,7 @@ export default async function EmbedPage(props: { searchParams: Promise<{ clientI
   // Retrieve widget configuration from the database
   const { data: config } = await supabase
     .from("widget_configs")
-    .select("brand_name, primary_color, welcome_message")
+    .select("brand_name, primary_color, welcome_message, logo_url")
     .eq("client_id", targetClientId)
     .maybeSingle();
 
@@ -34,6 +34,7 @@ export default async function EmbedPage(props: { searchParams: Promise<{ clientI
     companyName: config?.brand_name || "Tarkshy Assistant",
     accentColor: config?.primary_color || "#6366f1",
     greeting: config?.welcome_message || "Hello there! How can I help you today?",
+    logoUrl: config?.logo_url || undefined,
     clientId: targetClientId,
   };
 

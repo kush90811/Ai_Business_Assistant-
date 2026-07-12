@@ -1,8 +1,19 @@
 "use client";
 
+import React, { useState, useEffect } from "react";
 import { ROUTES } from "@/config/app";
 import type { SessionContext } from "@/types/auth";
-import { LayoutDashboard, MessageSquare, Users, BookOpen, Settings, LogOut, Terminal } from "lucide-react";
+import { 
+  LayoutDashboard, 
+  MessageSquare, 
+  Users, 
+  BookOpen, 
+  Settings, 
+  LogOut, 
+  Terminal,
+  Sun,
+  Moon
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -20,13 +31,39 @@ const navItems = [
 
 export function Sidebar({ session }: SidebarProps) {
   const pathname = usePathname();
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("theme") as "dark" | "light" | null;
+    if (savedTheme) {
+      setTheme(savedTheme);
+      if (savedTheme === "light") {
+        document.documentElement.classList.add("light");
+      } else {
+        document.documentElement.classList.remove("light");
+      }
+    } else {
+      document.documentElement.classList.remove("light");
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    setTheme(nextTheme);
+    localStorage.setItem("theme", nextTheme);
+    if (nextTheme === "light") {
+      document.documentElement.classList.add("light");
+    } else {
+      document.documentElement.classList.remove("light");
+    }
+  };
 
   return (
-    <aside className="w-64 border-r border-border bg-[#09090b]/80 backdrop-blur-md p-6 flex flex-col justify-between min-h-screen sticky top-0">
+    <aside className="w-64 border-r border-border bg-card/80 backdrop-blur-md p-6 flex flex-col justify-between min-h-screen sticky top-0">
       <div className="space-y-8">
         {/* Brand Logo */}
         <div className="flex items-center gap-2.5 px-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10 text-white shadow-inner border border-white/5 relative">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-foreground shadow-inner border border-border relative">
             <Terminal className="h-5 w-5 text-indigo-400" />
             <span className="absolute -top-0.5 -right-0.5 flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
@@ -34,7 +71,7 @@ export function Sidebar({ session }: SidebarProps) {
             </span>
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold tracking-tight text-white">Tarkshy AI</span>
+            <span className="text-sm font-semibold tracking-tight text-foreground">Tarkshy AI</span>
             <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-semibold">
               {session.tenant?.clientName ?? "SaaS Console"}
             </span>
@@ -53,8 +90,8 @@ export function Sidebar({ session }: SidebarProps) {
                 href={item.href}
                 className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 relative group ${
                   isActive
-                    ? "bg-indigo-500/10 text-white border-l-2 border-indigo-500 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]"
-                    : "text-muted-foreground hover:text-white hover:bg-white/5 border-l-2 border-transparent"
+                    ? "bg-indigo-500/10 text-foreground border-l-2 border-indigo-500 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50 border-l-2 border-transparent"
                 }`}
               >
                 <Icon className={`h-4.5 w-4.5 transition-colors duration-200 ${
@@ -72,12 +109,13 @@ export function Sidebar({ session }: SidebarProps) {
 
       {/* Footer Profile & Logout */}
       <div className="border-t border-border pt-4 mt-auto space-y-4">
+        {/* Profile Card */}
         <div className="flex items-center gap-3 px-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-900/40 text-indigo-200 font-bold border border-indigo-500/20 text-xs shadow-inner">
             {session.user.fullName ? session.user.fullName.slice(0, 2).toUpperCase() : session.user.email.slice(0, 2).toUpperCase()}
           </div>
           <div className="flex flex-col min-w-0 flex-1">
-            <p className="truncate text-xs font-semibold text-white">
+            <p className="truncate text-xs font-semibold text-foreground">
               {session.user.fullName || "User Account"}
             </p>
             <p className="truncate text-[10px] text-muted-foreground">
@@ -85,6 +123,21 @@ export function Sidebar({ session }: SidebarProps) {
             </p>
           </div>
         </div>
+
+        {/* Theme Toggle Button */}
+        <button
+          onClick={toggleTheme}
+          type="button"
+          className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-200 border border-transparent hover:border-border"
+        >
+          <span className="flex items-center gap-2">
+            {theme === "dark" ? <Sun className="h-4 w-4 text-amber-400 animate-pulse" /> : <Moon className="h-4 w-4 text-indigo-500" />}
+            <span>{theme === "dark" ? "Light Mode" : "Dark Mode"}</span>
+          </span>
+          <span className="text-[9px] uppercase tracking-wider text-muted-foreground bg-secondary px-1.5 py-0.5 rounded font-mono border border-border">
+            {theme}
+          </span>
+        </button>
 
         <form action="/logout" method="post">
           <button
