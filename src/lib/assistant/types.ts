@@ -10,7 +10,8 @@ export type UserIntent =
   | "technical_issue"
   | "purchase_intent"
   | "feature_comparison"
-  | "general_question";
+  | "general_question"
+  | "off_topic";
 
 export interface PendingConfirmation {
   field: string;

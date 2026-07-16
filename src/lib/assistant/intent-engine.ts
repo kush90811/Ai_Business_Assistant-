@@ -63,6 +63,7 @@ Example JSON output:
             "purchase_intent",
             "feature_comparison",
             "general_question",
+            "off_topic",
           ];
           if (validIntents.includes(intent)) {
             console.log(`[Intent Engine] Detected intent: ${intent}`);

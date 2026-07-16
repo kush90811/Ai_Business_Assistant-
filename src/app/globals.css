@@ -115,13 +115,15 @@ h6 {
 
 /* Widget Markdown Styles */
 .widget-markdown {
-  line-height: 1.6;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.625;
   white-space: pre-wrap;
   word-wrap: break-word;
 }
 .widget-markdown strong {
-  font-weight: 600;
-  color: #e5e5f0;
+  font-weight: 700;
+  color: var(--widget-accent, #818cf8);
 }
 .widget-markdown em {
   font-style: italic;

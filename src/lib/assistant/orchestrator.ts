@@ -164,6 +164,29 @@ export class AssistantOrchestrator {
     };
     const intent = analysis.intent;
 
+    if (intent === "off_topic") {
+      console.log(`[Orchestrator] Off-topic query detected. Bypassing LLM answer generation.`);
+      const responseText = `I can only help with questions related to our business, services, pricing, or support. Please let me know how I can help you with those!`;
+
+      await supabase.from("chat_messages").insert({
+        client_id: clientId,
+        session_id: sessionId,
+        role: "assistant",
+        content: responseText,
+      });
+
+      await supabase
+        .from("chat_sessions")
+        .update({ last_activity_at: new Date().toISOString() })
+        .eq("id", sessionId);
+
+      return {
+        response: responseText,
+        sessionId,
+        stage: currentStage,
+      };
+    }
+
     const hasAnyEntity = Object.values(extracted).some((v) => v !== null);
 
     if (hasAnyEntity) {
@@ -469,6 +492,7 @@ Your task is to analyze the latest user message and the context from the convers
 Classify the user's latest message into EXACTLY ONE of these intents:
 - "greeting": Greetings or hellos (e.g., "hi", "hello", "good morning")
 - "small_talk": Casual non-business conversations (e.g., "how are you?", "who are you?", general chit-chat)
+- "off_topic": Personal queries, general knowledge, math calculations, coding help, advice, or questions completely unrelated to the client's business, services, pricing, or support (e.g., "who is bahubali?", "what is 2 + 2?", "write a python script", "tell me a joke").
 - "product_inquiry": Questions about services, features, or what the company does
 - "pricing_inquiry": Inquiries about pricing, costs, plans, or billing models
 - "demo_request": Explicit requests to see a demo, walkthrough, or booking a meeting
@@ -476,7 +500,7 @@ Classify the user's latest message into EXACTLY ONE of these intents:
 - "technical_issue": Specifically reporting errors, bugs, or widget/system loading failures
 - "purchase_intent": Clear expressions of intent to purchase, upgrade, subscribe, or buy
 - "feature_comparison": Comparing the product/service with competitors (e.g., "vs Intercom", "compared to competitors")
-- "general_question": Any other question or statement that doesn't fit the above
+- "general_question": Any other business-related question or statement that doesn't fit the above but is still related to the company or client's domain.
 
 === Task 2: Lead Entity Extraction ===
 Extract lead qualification fields from the user's latest message.

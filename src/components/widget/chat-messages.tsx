@@ -154,7 +154,7 @@ export function ChatMessages({
         return (
           <div 
             key={m.id} 
-            className={`flex gap-2.5 text-xs max-w-[85%] ${
+            className={`flex gap-2.5 text-[13.5px] max-w-[85%] ${
               isBot ? "mr-auto" : "ml-auto flex-row-reverse"
             }`}
           >
@@ -192,7 +192,8 @@ export function ChatMessages({
             >
               {isBot ? (
                 <div 
-                  className="widget-markdown"
+                  className="widget-markdown text-[13.5px]"
+                  style={{ "--widget-accent": accentColor } as React.CSSProperties}
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }} 
                 />
               ) : (
