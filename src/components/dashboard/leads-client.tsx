@@ -8,7 +8,17 @@ import {
   ArrowUpDown,
   RefreshCw,
   AlertTriangle,
-  Trash2
+  Trash2,
+  Kanban,
+  Table,
+  PhoneCall,
+  Mail,
+  UserCheck,
+  Sparkles,
+  GripVertical,
+  CheckCircle2,
+  Clock,
+  Tag
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { SessionContext } from "@/types/auth";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { calculateLeadScore } from "@/lib/utils";
 
 interface Lead {
   id: string;
@@ -33,8 +44,23 @@ interface LeadsClientProps {
   session: SessionContext;
 }
 
+const STAGE_COLUMNS: { 
+  id: Lead["status"]; 
+  title: string; 
+  subtitle: string; 
+  color: string; 
+  headerBg: string; 
+  accentBorder: string;
+}[] = [
+  { id: "new", title: "New Leads", subtitle: "Freshly captured contacts", color: "text-sky-400", headerBg: "bg-sky-500/10 border-sky-500/20", accentBorder: "border-sky-500/40" },
+  { id: "contacted", title: "Contacted", subtitle: "Outreach in progress", color: "text-amber-400", headerBg: "bg-amber-500/10 border-amber-500/20", accentBorder: "border-amber-500/40" },
+  { id: "qualified", title: "Qualified", subtitle: "High purchase intent", color: "text-emerald-400", headerBg: "bg-emerald-500/10 border-emerald-500/20", accentBorder: "border-emerald-500/40" },
+  { id: "nurturing", title: "Nurturing", subtitle: "Follow-up required", color: "text-purple-400", headerBg: "bg-purple-500/10 border-purple-500/20", accentBorder: "border-purple-500/40" },
+];
+
 export function LeadsClient({ session }: LeadsClientProps) {
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [viewMode, setViewMode] = useState<"crm" | "table">("crm");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "new" | "contacted" | "qualified" | "nurturing">("all");
   const [sortBy, setSortBy] = useState<"date" | "score">("date");
@@ -42,6 +68,10 @@ export function LeadsClient({ session }: LeadsClientProps) {
   const [toastMessage, setToastMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+
+  // Drag & Drop States
+  const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<Lead["status"] | null>(null);
 
   // Deletion States
   const [deleteLead, setDeleteLead] = useState<Lead | null>(null);
@@ -54,7 +84,7 @@ export function LeadsClient({ session }: LeadsClientProps) {
 
   const triggerToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(""), 3000);
+    setTimeout(() => setToastMessage(""), 3500);
   };
 
   const fetchLeads = useCallback(async (silent = false) => {
@@ -76,19 +106,14 @@ export function LeadsClient({ session }: LeadsClientProps) {
       if (error) throw error;
 
       const mapped: Lead[] = (data || []).map(l => {
-        // Compute realistic lead intent score based on field presence
-        let score = 30;
-        if (l.email) score += 40;
-        if (l.phone) score += 20;
-        if (l.name && l.name !== "Anonymous") score += 10;
-        if (l.status === "qualified") score += 10;
-        else if (l.status === "contacted") score += 5;
-
-        // Overwrite if explicit score exists in metadata
         const meta = l.metadata as Record<string, unknown> | null;
-        if (meta && typeof meta === "object" && "score" in meta) {
-          score = Number(meta.score) || score;
-        }
+        const score = calculateLeadScore({
+          email: l.email,
+          phone: l.phone,
+          name: l.name,
+          status: l.status,
+          metadata: meta,
+        });
 
         return {
           id: l.id,
@@ -96,7 +121,7 @@ export function LeadsClient({ session }: LeadsClientProps) {
           email: l.email || "",
           phone: l.phone || "",
           status: (l.status as Lead["status"]) || "new",
-          score: Math.min(score, 100),
+          score,
           source: l.source || "chatbot",
           capturedAt: l.created_at,
           sessionId: l.session_id || null,
@@ -116,6 +141,73 @@ export function LeadsClient({ session }: LeadsClientProps) {
   useEffect(() => {
     fetchLeads();
   }, [fetchLeads]);
+
+  // Lead Status Conversion & Intent Score Sync Handler
+  const handleStatusChange = async (leadId: string, newStatus: Lead["status"]) => {
+    if (!leadId) return;
+
+    const targetLead = leads.find(l => l.id === leadId);
+    if (!targetLead) return;
+    if (targetLead.status === newStatus) return;
+
+    // Optimistically update local state & recalculate score
+    setLeads(prevLeads =>
+      prevLeads.map(l => {
+        if (l.id === leadId) {
+          const updatedScore = calculateLeadScore({
+            name: l.name,
+            email: l.email,
+            phone: l.phone,
+            status: newStatus,
+          });
+          return { ...l, status: newStatus, score: updatedScore };
+        }
+        return l;
+      })
+    );
+
+    triggerToast(`Lead "${targetLead.name}" moved to ${newStatus.toUpperCase()}!`);
+
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .update({ status: newStatus })
+        .eq("id", leadId)
+        .eq("client_id", clientId);
+
+      if (error) throw error;
+    } catch (err: unknown) {
+      console.warn("Failed to sync lead status to database, retaining local UI update:", err);
+    }
+  };
+
+  // Drag and Drop Handlers for Kanban Board
+  const handleDragStart = (e: React.DragEvent, leadId: string) => {
+    e.dataTransfer.setData("text/plain", leadId);
+    setDraggedLeadId(leadId);
+  };
+
+  const handleDragOver = (e: React.DragEvent, status: Lead["status"]) => {
+    e.preventDefault();
+    if (dragOverColumn !== status) {
+      setDragOverColumn(status);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverColumn(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetStatus: Lead["status"]) => {
+    e.preventDefault();
+    setDragOverColumn(null);
+    const leadId = e.dataTransfer.getData("text/plain") || draggedLeadId;
+    if (leadId) {
+      handleStatusChange(leadId, targetStatus);
+    }
+    setDraggedLeadId(null);
+  };
 
   const toggleSort = (field: "date" | "score") => {
     if (sortBy === field) {
@@ -178,6 +270,7 @@ export function LeadsClient({ session }: LeadsClientProps) {
         if (sessionError) throw sessionError;
       }
 
+      setLeads(prev => prev.filter(l => l.id !== deleteLead.id));
       triggerToast(`Lead "${deleteLead.name}" deleted successfully.`);
       fetchLeads(true); // silent refresh
     } catch (err: any) {
@@ -237,6 +330,7 @@ export function LeadsClient({ session }: LeadsClientProps) {
         if (leadError) throw leadError;
       }
 
+      setLeads([]);
       triggerToast("All leads deleted successfully.");
       fetchLeads(true); // silent refresh
     } catch (err: any) {
@@ -268,27 +362,13 @@ export function LeadsClient({ session }: LeadsClientProps) {
       return sortOrder === "asc" ? comparison : -comparison;
     });
 
-  const getStatusBadge = (status: Lead["status"]) => {
-    switch (status) {
-      case "qualified":
-        return <Badge variant="success" className="uppercase text-[9px] font-bold tracking-wider px-2 py-0.5">qualified</Badge>;
-      case "contacted":
-        return <Badge variant="info" className="uppercase text-[9px] font-bold tracking-wider px-2 py-0.5">contacted</Badge>;
-      case "nurturing":
-        return <Badge variant="warning" className="uppercase text-[9px] font-bold tracking-wider px-2 py-0.5">nurturing</Badge>;
-      case "new":
-      default:
-        return <Badge variant="outline" className="uppercase text-[9px] font-bold tracking-wider px-2 py-0.5">new</Badge>;
-    }
-  };
-
   return (
     <div className="space-y-8 relative">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#161622] border border-indigo-500/30 rounded-xl p-4 shadow-2xl flex items-center gap-3 animate-fade-in max-w-sm glass">
           <div className="p-1.5 bg-indigo-500/10 rounded-lg text-indigo-400">
-            <Trash2 className="h-4 w-4" />
+            <Sparkles className="h-4 w-4" />
           </div>
           <p className="text-xs font-semibold text-white leading-normal">{toastMessage}</p>
         </div>
@@ -400,15 +480,47 @@ export function LeadsClient({ session }: LeadsClientProps) {
         </div>
       )}
 
-      {/* Header */}
-      <div className="border-b border-border/40 pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      {/* Header & Controls */}
+      <div className="border-b border-border/40 pb-4 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Leads Pipeline</h1>
+          <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
+            Leads Pipeline CRM
+            <span className="text-xs font-semibold font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full px-3 py-0.5">
+              Odoo Pipeline Active
+            </span>
+          </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Browse and export contacts captured automatically by your AI Chatbot Widget.
+            Drag and drop leads between stage columns or switch to table view to manage customer conversions.
           </p>
         </div>
-        <div className="flex gap-2 w-full sm:w-auto">
+
+        <div className="flex flex-wrap gap-2.5 w-full lg:w-auto items-center">
+          {/* View Mode Toggle Switch */}
+          <div className="flex bg-[#121217] p-1 rounded-xl border border-white/10 shrink-0">
+            <button
+              onClick={() => setViewMode("crm")}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                viewMode === "crm"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 font-bold"
+                  : "text-neutral-400 hover:text-white"
+              }`}
+            >
+              <Kanban className="h-3.5 w-3.5" />
+              CRM Kanban
+            </button>
+            <button
+              onClick={() => setViewMode("table")}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                viewMode === "table"
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 font-bold"
+                  : "text-neutral-400 hover:text-white"
+              }`}
+            >
+              <Table className="h-3.5 w-3.5" />
+              Table View
+            </button>
+          </div>
+
           <Button
             variant="outline"
             size="sm"
@@ -417,7 +529,7 @@ export function LeadsClient({ session }: LeadsClientProps) {
             className="text-xs h-9 border-rose-500/20 hover:border-rose-500/50 hover:bg-rose-500/10 text-rose-400 gap-1.5"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            Delete All Leads
+            Delete All
           </Button>
           <Button
             variant="outline"
@@ -435,19 +547,19 @@ export function LeadsClient({ session }: LeadsClientProps) {
             className="bg-indigo-600 hover:bg-indigo-500 text-white gap-2 text-xs font-semibold px-4 h-9 shadow-lg shadow-indigo-600/15"
           >
             <Download className="h-4 w-4" />
-            Export to CSV
+            Export CSV
           </Button>
         </div>
       </div>
 
-      {/* Toolbar / Filters */}
+      {/* Toolbar / Search & Filters */}
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between bg-[#09090b]/40 backdrop-blur-md border border-border p-4 rounded-xl shadow-inner glow-card">
         
         {/* Search */}
         <div className="relative w-full md:w-80">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search leads by name, email..."
+            placeholder="Search leads by name, email, phone..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9 bg-[#121217] border-border text-xs"
@@ -472,130 +584,274 @@ export function LeadsClient({ session }: LeadsClientProps) {
         </div>
       </div>
 
-      {/* Table Container */}
-      <Card>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-border/45 bg-black/10 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  <th className="py-3.5 px-4 font-semibold">Contact Info</th>
-                  <th className="py-3.5 px-4 font-semibold">Phone Number</th>
-                  <th className="py-3.5 px-4 font-semibold">
-                    <button 
-                      onClick={() => toggleSort("date")} 
-                      className="flex items-center gap-1.5 hover:text-white transition-colors"
-                    >
-                      Date Captured
-                      <ArrowUpDown className="h-3.5 w-3.5" />
-                    </button>
-                  </th>
-                  <th className="py-3.5 px-4 font-semibold">Source Page</th>
-                  <th className="py-3.5 px-4 font-semibold">Status</th>
-                  <th className="py-3.5 px-4 font-semibold text-right">
-                    <button 
-                      onClick={() => toggleSort("score")} 
-                      className="flex items-center gap-1.5 hover:text-white transition-colors ml-auto"
-                    >
-                      Intent Score
-                      <ArrowUpDown className="h-3.5 w-3.5" />
-                    </button>
-                  </th>
-                  <th className="py-3.5 px-4 font-semibold text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/20 text-neutral-200">
-                {loading && leads.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="py-12 text-center text-muted-foreground">
-                      <div className="flex items-center justify-center gap-2 text-xs">
-                        <RefreshCw className="h-4 w-4 animate-spin text-indigo-400" />
-                        Loading leads...
-                      </div>
-                    </td>
-                  </tr>
-                ) : errorMessage ? (
-                  <tr>
-                    <td colSpan={7} className="py-12 text-center text-red-400">
-                      <div className="flex flex-col items-center justify-center gap-2 text-xs">
-                        <AlertTriangle className="h-5 w-5" />
-                        {errorMessage}
-                      </div>
-                    </td>
-                  </tr>
-                ) : filteredLeads.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="py-12 text-center text-muted-foreground">
-                      No leads match the selected criteria.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredLeads.map((lead) => (
-                    <tr key={lead.id} className="hover:bg-white/5 transition-colors group">
-                      
-                      {/* Name / Email */}
-                      <td className="py-3.5 px-4 font-semibold text-white">
-                        <div className="flex items-center gap-2.5">
-                          <div className="h-7 w-7 rounded-full bg-indigo-950/40 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-[10px]">
-                            {lead.name.split(" ").map(n=>n[0]).join("")}
+      {/* MAIN VIEW AREA: CRM Kanban or Table View */}
+      {viewMode === "crm" ? (
+        /* Odoo / HubSpot Style Drag-and-Drop CRM Kanban Board */
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 min-h-[600px] items-start pb-8">
+          {STAGE_COLUMNS.map((col) => {
+            const columnLeads = filteredLeads.filter((l) => l.status === col.id);
+            const isTargetDrop = dragOverColumn === col.id;
+
+            return (
+              <div
+                key={col.id}
+                onDragOver={(e) => handleDragOver(e, col.id)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, col.id)}
+                className={`flex flex-col rounded-2xl border transition-all duration-200 bg-[#0c0c10]/80 p-4 space-y-4 min-h-[580px] ${
+                  isTargetDrop
+                    ? `border-indigo-500 ring-2 ring-indigo-500/30 ${col.headerBg} shadow-2xl scale-[1.01]`
+                    : `${col.accentBorder} hover:border-white/20`
+                }`}
+              >
+                {/* Column Header */}
+                <div className={`p-3 rounded-xl border flex items-center justify-between ${col.headerBg}`}>
+                  <div className="space-y-0.5">
+                    <h3 className={`text-sm font-extrabold tracking-tight flex items-center gap-2 ${col.color}`}>
+                      {col.title}
+                    </h3>
+                    <p className="text-[10px] text-neutral-400 font-medium">{col.subtitle}</p>
+                  </div>
+                  <Badge variant="outline" className={`font-mono text-xs px-2.5 py-0.5 font-bold ${col.color} border-current/30`}>
+                    {columnLeads.length}
+                  </Badge>
+                </div>
+
+                {/* Column Cards Container */}
+                <div className="flex-1 space-y-3.5 overflow-y-auto pr-0.5">
+                  {columnLeads.length === 0 ? (
+                    <div className={`h-40 border border-dashed rounded-xl flex flex-col items-center justify-center p-4 text-center ${
+                      isTargetDrop ? "border-indigo-500/50 bg-indigo-500/10" : "border-white/10 bg-white/[0.01]"
+                    }`}>
+                      <p className="text-xs font-semibold text-neutral-500">No leads in this stage</p>
+                      <p className="text-[10px] text-neutral-600 mt-1">Drag a lead card here to change status</p>
+                    </div>
+                  ) : (
+                    columnLeads.map((lead) => (
+                      <div
+                        key={lead.id}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, lead.id)}
+                        className={`group bg-[#13131a] hover:bg-[#181824] border border-white/10 hover:border-indigo-500/40 rounded-xl p-4 space-y-3.5 shadow-md hover:shadow-xl transition-all duration-200 cursor-grab active:cursor-grabbing relative overflow-hidden ${
+                          draggedLeadId === lead.id ? "opacity-40 border-dashed border-indigo-400 scale-95" : ""
+                        }`}
+                      >
+                        {/* Top Indicator bar */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5">
+                            <div className="h-8 w-8 rounded-full bg-indigo-950/60 border border-indigo-500/30 text-indigo-300 flex items-center justify-center font-bold text-xs shadow-inner shrink-0">
+                              {lead.name.split(" ").map((n) => n[0]).join("")}
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-extrabold text-white group-hover:text-indigo-300 transition-colors flex items-center gap-1.5">
+                                {lead.name}
+                              </h4>
+                              <p className="text-[10px] text-neutral-400 truncate max-w-[150px]">{lead.email || "No email"}</p>
+                            </div>
                           </div>
-                          <div className="flex flex-col">
-                            <span className="font-semibold text-neutral-200 group-hover:text-indigo-300 transition-colors">{lead.name}</span>
-                            <span className="text-[10px] text-muted-foreground font-normal">{lead.email}</span>
+
+                          <button
+                            onClick={() => setDeleteLead(lead)}
+                            className="text-neutral-500 hover:text-rose-400 p-1 rounded-lg hover:bg-rose-500/10 transition-colors opacity-0 group-hover:opacity-100"
+                            title="Delete Lead"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Phone & Source Meta */}
+                        <div className="space-y-1.5 pt-1 text-[11px] text-neutral-300 border-t border-white/5">
+                          {lead.phone && (
+                            <div className="flex items-center gap-1.5 text-neutral-400 font-mono text-[10.5px]">
+                              <PhoneCall className="h-3 w-3 text-indigo-400 shrink-0" />
+                              {lead.phone}
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between text-[10px] text-neutral-400 pt-1">
+                            <span className="flex items-center gap-1 font-mono bg-white/5 border border-white/5 rounded px-1.5 py-0.5 text-neutral-300">
+                              <Tag className="h-2.5 w-2.5 text-indigo-400" />
+                              {lead.source}
+                            </span>
+                            <span className="flex items-center gap-1 text-neutral-500">
+                              <Clock className="h-2.5 w-2.5" />
+                              {new Date(lead.capturedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            </span>
                           </div>
                         </div>
-                      </td>
 
-                      {/* Phone */}
-                      <td className="py-3.5 px-4 text-muted-foreground font-mono">{lead.phone || "—"}</td>
+                        {/* Card Footer: Intent Score & Interactive Status Conversion Dropdown */}
+                        <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                          {/* Intent Score Badge */}
+                          <div className="flex items-center gap-1">
+                            <span className="text-[9px] font-bold uppercase text-neutral-400">Score:</span>
+                            <Badge
+                              variant={lead.score >= 80 ? "success" : "warning"}
+                              className="text-[9.5px] font-mono px-1.5 py-0.5 font-extrabold"
+                            >
+                              {lead.score}/100
+                            </Badge>
+                          </div>
 
-                      {/* Date */}
-                      <td className="py-3.5 px-4 text-muted-foreground">
-                        <span className="flex items-center gap-1.5">
-                          <Calendar className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                          {new Date(lead.capturedAt).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric"
-                          })}
-                        </span>
-                      </td>
-
-                      {/* Source URL */}
-                      <td className="py-3.5 px-4">
-                        <span className="font-mono text-[10px] bg-white/5 border border-white/5 rounded px-2 py-0.5 text-neutral-300">
-                          {lead.source}
-                        </span>
-                      </td>
-
-                      {/* Status */}
-                      <td className="py-3.5 px-4">{getStatusBadge(lead.status)}</td>
-
-                      {/* Intent Score */}
-                      <td className="py-3.5 px-4 text-right">
-                        <Badge variant={lead.score >= 80 ? "success" : "warning"} className="text-[10px] font-mono px-2 py-0.5 font-bold">
-                          {lead.score}/100
-                        </Badge>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={() => setDeleteLead(lead)}
-                          className="p-1.5 text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
-                          title="Delete Lead"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                          {/* Interactive Status Conversion Dropdown */}
+                          <select
+                            value={lead.status}
+                            onChange={(e) => handleStatusChange(lead.id, e.target.value as Lead["status"])}
+                            onClick={(e) => e.stopPropagation()}
+                            className="bg-[#1a1a24] border border-white/10 text-[10px] font-bold uppercase tracking-wider rounded-lg px-2 py-1 text-neutral-200 cursor-pointer focus:outline-none focus:border-indigo-500 hover:border-white/30 transition-colors"
+                          >
+                            <option value="new">NEW</option>
+                            <option value="contacted">CONTACTED</option>
+                            <option value="qualified">QUALIFIED</option>
+                            <option value="nurturing">NURTURING</option>
+                          </select>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* Table View */
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-border/45 bg-black/10 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    <th className="py-3.5 px-4 font-semibold">Contact Info</th>
+                    <th className="py-3.5 px-4 font-semibold">Phone Number</th>
+                    <th className="py-3.5 px-4 font-semibold">
+                      <button
+                        onClick={() => toggleSort("date")}
+                        className="flex items-center gap-1 hover:text-white transition-colors"
+                      >
+                        Date Captured <ArrowUpDown className="h-3 w-3" />
+                      </button>
+                    </th>
+                    <th className="py-3.5 px-4 font-semibold">Source Page</th>
+                    <th className="py-3.5 px-4 font-semibold">Stage Conversion</th>
+                    <th className="py-3.5 px-4 font-semibold text-right">
+                      <button
+                        onClick={() => toggleSort("score")}
+                        className="flex items-center gap-1 justify-end hover:text-white transition-colors ml-auto"
+                      >
+                        Intent Score <ArrowUpDown className="h-3 w-3" />
+                      </button>
+                    </th>
+                    <th className="py-3.5 px-4 font-semibold text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/20 text-neutral-200">
+                  {loading && leads.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-muted-foreground">
+                        <div className="flex items-center justify-center gap-2 text-xs">
+                          <RefreshCw className="h-4 w-4 animate-spin text-indigo-400" />
+                          Loading leads...
+                        </div>
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
+                  ) : errorMessage ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-red-400">
+                        <div className="flex flex-col items-center justify-center gap-2 text-xs">
+                          <AlertTriangle className="h-5 w-5" />
+                          {errorMessage}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : filteredLeads.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-muted-foreground">
+                        No leads match the selected criteria.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredLeads.map((lead) => (
+                      <tr key={lead.id} className="hover:bg-white/5 transition-colors group">
+                        {/* Name / Email */}
+                        <td className="py-3.5 px-4 font-semibold text-white">
+                          <div className="flex items-center gap-2.5">
+                            <div className="h-7 w-7 rounded-full bg-indigo-950/40 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-[10px]">
+                              {lead.name.split(" ").map((n) => n[0]).join("")}
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="font-semibold text-neutral-200 group-hover:text-indigo-300 transition-colors">
+                                {lead.name}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground font-normal">{lead.email}</span>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Phone */}
+                        <td className="py-3.5 px-4 text-muted-foreground font-mono">{lead.phone || "—"}</td>
+
+                        {/* Date */}
+                        <td className="py-3.5 px-4 text-muted-foreground">
+                          <span className="flex items-center gap-1.5">
+                            <Calendar className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                            {new Date(lead.capturedAt).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })}
+                          </span>
+                        </td>
+
+                        {/* Source URL */}
+                        <td className="py-3.5 px-4">
+                          <span className="font-mono text-[10px] bg-white/5 border border-white/5 rounded px-2 py-0.5 text-neutral-300">
+                            {lead.source}
+                          </span>
+                        </td>
+
+                        {/* Interactive Status Selector */}
+                        <td className="py-3.5 px-4">
+                          <select
+                            value={lead.status}
+                            onChange={(e) => handleStatusChange(lead.id, e.target.value as Lead["status"])}
+                            className="bg-[#121217] border border-white/10 text-[10px] font-bold uppercase tracking-wider rounded-lg px-2.5 py-1 text-neutral-200 cursor-pointer focus:outline-none focus:border-indigo-500 hover:border-white/30 transition-colors"
+                          >
+                            <option value="new">NEW</option>
+                            <option value="contacted">CONTACTED</option>
+                            <option value="qualified">QUALIFIED</option>
+                            <option value="nurturing">NURTURING</option>
+                          </select>
+                        </td>
+
+                        {/* Intent Score */}
+                        <td className="py-3.5 px-4 text-right">
+                          <Badge
+                            variant={lead.score >= 80 ? "success" : "warning"}
+                            className="text-[10px] font-mono px-2 py-0.5 font-bold"
+                          >
+                            {lead.score}/100
+                          </Badge>
+                        </td>
+
+                        {/* Actions */}
+                        <td className="py-3.5 px-4 text-right">
+                          <button
+                            onClick={() => setDeleteLead(lead)}
+                            className="p-1.5 text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                            title="Delete Lead"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

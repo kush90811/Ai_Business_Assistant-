@@ -3,26 +3,26 @@
 @tailwind utilities;
 
 :root {
-  --background: 240 10% 3.9%;
-  --foreground: 0 0% 98%;
-  --card: 240 10% 4.5%;
-  --card-foreground: 0 0% 98%;
-  --popover: 240 10% 3.9%;
-  --popover-foreground: 0 0% 98%;
-  --primary: 240 5.9% 90%;
-  --primary-foreground: 240 5.9% 10%;
-  --secondary: 240 3.7% 15.9%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 240 3.7% 12%;
-  --muted-foreground: 240 5% 64.9%;
-  --accent: 240 3.7% 15.9%;
-  --accent-foreground: 0 0% 98%;
-  --destructive: 0 62.8% 30.6%;
+  --background: 232 40% 4%;
+  --foreground: 210 40% 98%;
+  --card: 230 35% 7%;
+  --card-foreground: 210 40% 98%;
+  --popover: 230 35% 7%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 263 84% 65%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 230 25% 13%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 230 25% 11%;
+  --muted-foreground: 215 20% 75%;
+  --accent: 263 84% 65%;
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 72% 51%;
   --destructive-foreground: 0 0% 98%;
-  --border: 240 3.7% 15.9%;
-  --input: 240 3.7% 15.9%;
-  --ring: 240 4.9% 83.9%;
-  --radius: 0.75rem;
+  --border: 230 25% 15%;
+  --input: 230 25% 15%;
+  --ring: 263 84% 65%;
+  --radius: 0.95rem;
 }
 
 * {
@@ -37,10 +37,15 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  background: radial-gradient(circle at 50% 0%, hsl(240 10% 8%) 0%, hsl(var(--background)) 70%);
+  background: 
+    radial-gradient(ellipse at 15% -10%, rgba(139, 92, 246, 0.22), transparent 50%),
+    radial-gradient(ellipse at 85% 30%, rgba(6, 182, 212, 0.16), transparent 50%),
+    radial-gradient(ellipse at 50% 90%, rgba(16, 185, 129, 0.1), transparent 60%),
+    hsl(232 40% 4%);
   color: hsl(var(--foreground));
-  font-family: var(--font-sans), system-ui, sans-serif;
+  font-family: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   overflow-x: hidden;
+  letter-spacing: -0.012em;
 }
 
 /* Custom Scrollbar */
@@ -49,22 +54,46 @@ body {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: hsl(var(--background));
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--secondary));
+  background: rgba(139, 92, 246, 0.25);
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.5);
+  background: rgba(139, 92, 246, 0.5);
 }
 
-/* Glow Cards & Borders */
-.glow-card {
+/* Unique Gradient Text Utilities */
+.text-gradient-violet {
+  background: linear-gradient(135deg, #c084fc 0%, #a855f7 50%, #38bdf8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.text-gradient-cyan {
+  background: linear-gradient(135deg, #38bdf8 0%, #34d399 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.text-gradient-amber {
+  background: linear-gradient(135deg, #fbbf24 0%, #f97316 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Cyber Glow Cards & Holographic Borders */
+.glow-card, .cyber-card {
   position: relative;
   overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  border: 1px solid rgba(139, 92, 246, 0.18) !important;
 }
-.glow-card::before {
+.glow-card::before, .cyber-card::before {
   content: '';
   position: absolute;
   top: 0;
@@ -73,19 +102,25 @@ body {
   bottom: 0;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(to bottom right, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.01));
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(56, 189, 248, 0.2), rgba(255, 255, 255, 0.02));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
 }
+.glow-card:hover, .cyber-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 35px -12px rgba(139, 92, 246, 0.25), 0 0 15px 0 rgba(6, 182, 212, 0.15);
+  border-color: rgba(168, 85, 247, 0.45) !important;
+}
 
 /* Glassmorphism Classes */
 .glass {
-  background: rgba(15, 15, 20, 0.5);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(10, 14, 26, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(139, 92, 246, 0.2);
 }
 
 /* Typing Indicator Animation */
@@ -110,7 +145,7 @@ h4,
 h5,
 h6 {
   font-family: var(--font-display), system-ui, sans-serif;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
 }
 
 /* Widget Markdown Styles */
@@ -123,7 +158,7 @@ h6 {
 }
 .widget-markdown strong {
   font-weight: 700;
-  color: var(--widget-accent, #818cf8);
+  color: var(--widget-accent, #a78bfa);
 }
 .widget-markdown em {
   font-style: italic;
@@ -143,56 +178,69 @@ h6 {
   margin-bottom: 0.2em;
 }
 
+/* Dark Mode High-Contrast Overrides */
+:root .text-neutral-500 { color: #a7f3d0 !important; } /* High clarity contrast */
+:root .text-neutral-500, :root .text-muted-foreground { color: #cbd5e1 !important; }
+:root .text-neutral-600 { color: #e2e8f0 !important; }
+:root .text-white\/50 { color: rgba(255, 255, 255, 0.8) !important; }
+:root .text-white\/40 { color: rgba(255, 255, 255, 0.75) !important; }
+:root .text-white\/30 { color: rgba(255, 255, 255, 0.65) !important; }
+
 /* ============================================================================
-   Light Theme System & Overrides
+   Light Theme System & Cyber Ice Pearl Colors
    ============================================================================ */
 html.light {
   color-scheme: light;
-  --background: 0 0% 100%;
-  --foreground: 240 10% 3.9%;
+  --background: 210 40% 98%;
+  --foreground: 222 47% 11%;
   --card: 0 0% 100%;
-  --card-foreground: 240 10% 3.9%;
+  --card-foreground: 222 47% 11%;
   --popover: 0 0% 100%;
-  --popover-foreground: 240 10% 3.9%;
-  --primary: 240 5.9% 10%;
-  --primary-foreground: 0 0% 98%;
-  --secondary: 240 4.8% 95.9%;
-  --secondary-foreground: 240 5.9% 10%;
-  --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
-  --accent: 240 4.8% 95.9%;
-  --accent-foreground: 240 5.9% 10%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 263 84% 58%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 214 32% 92%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 214 32% 95%;
+  --muted-foreground: 215 25% 32%;
+  --accent: 263 84% 58%;
+  --accent-foreground: 0 0% 100%;
   --destructive: 0 84.2% 60.2%;
   --destructive-foreground: 0 0% 98%;
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
-  --ring: 240 5.9% 10%;
+  --border: 214 32% 86%;
+  --input: 214 32% 86%;
+  --ring: 263 84% 58%;
 }
 
-/* Redefine body background for light mode */
+/* Light mode body mesh background */
 html.light body {
-  background: radial-gradient(circle at 50% 0%, hsl(240 20% 97%) 0%, hsl(var(--background)) 70%);
+  background: 
+    radial-gradient(ellipse at 20% -10%, rgba(168, 85, 247, 0.12), transparent 60%),
+    radial-gradient(ellipse at 80% 40%, rgba(56, 189, 248, 0.1), transparent 50%),
+    hsl(210 40% 98%);
   color: hsl(var(--foreground));
 }
 
-/* Override dark hex backgrounds in light mode */
-html.light .bg-\[\#09090b\] { background-color: hsl(var(--background)) !important; }
-html.light .bg-\[\#09090b\]\/40 { background-color: hsl(var(--card) / 0.4) !important; }
-html.light .bg-\[\#09090b\]\/60 { background-color: hsl(var(--card) / 0.6) !important; }
-html.light .bg-\[\#09090b\]\/80 { background-color: hsl(var(--card) / 0.8) !important; }
-html.light .bg-\[\#121217\] { background-color: hsl(var(--muted) / 0.6) !important; }
+/* Override dark hex backgrounds in light mode to clean white/slate */
+html.light .bg-\[\#09090b\] { background-color: hsl(var(--card)) !important; }
+html.light .bg-\[\#09090b\]\/40 { background-color: hsl(var(--card) / 0.9) !important; }
+html.light .bg-\[\#09090b\]\/60 { background-color: hsl(var(--card)) !important; }
+html.light .bg-\[\#09090b\]\/80 { background-color: hsl(var(--card)) !important; }
+html.light .bg-\[\#121217\] { background-color: hsl(var(--muted)) !important; }
 html.light .bg-\[\#161622\] { background-color: hsl(var(--card)) !important; }
 html.light .bg-\[\#0f0f13\] { background-color: hsl(var(--card)) !important; }
-html.light .bg-\[\#0f0f13\]\/40 { background-color: hsl(var(--card) / 0.4) !important; }
-html.light .bg-\[\#121217\]\/60 { background-color: hsl(var(--muted) / 0.4) !important; }
+html.light .bg-\[\#0f0f13\]\/40 { background-color: hsl(var(--card) / 0.9) !important; }
+html.light .bg-\[\#121217\]\/60 { background-color: hsl(var(--muted)) !important; }
+html.light .bg-\[\#0d0d12\] { background-color: hsl(var(--muted) / 0.6) !important; }
 
 /* Override hardcoded border colors in light mode */
 html.light .border-white\/5 { border-color: hsl(var(--border)) !important; }
 html.light .border-white\/10 { border-color: hsl(var(--border)) !important; }
-html.light .border-border\/40 { border-color: hsl(var(--border) / 0.4) !important; }
-html.light .border-border\/60 { border-color: hsl(var(--border) / 0.6) !important; }
+html.light .border-white\/20 { border-color: hsl(var(--border)) !important; }
+html.light .border-border\/40 { border-color: hsl(var(--border) / 0.8) !important; }
+html.light .border-border\/60 { border-color: hsl(var(--border)) !important; }
 
-/* Text colors in light mode */
+/* Comprehensive Text Contrast Rules in Light Mode */
 html.light h1, 
 html.light h2, 
 html.light h3, 
@@ -202,20 +250,48 @@ html.light h6,
 html.light .text-white { 
   color: hsl(var(--foreground)) !important; 
 }
+html.light .text-white\/90 { color: hsl(222 47% 15%) !important; }
+html.light .text-white\/80 { color: hsl(222 47% 20%) !important; }
+html.light .text-white\/70 { color: hsl(215 25% 25%) !important; }
+html.light .text-white\/60 { color: hsl(215 25% 30%) !important; }
+html.light .text-white\/50 { color: hsl(215 25% 35%) !important; }
+html.light .text-white\/40 { color: hsl(215 25% 38%) !important; }
+html.light .text-white\/30 { color: hsl(215 25% 42%) !important; }
 
-/* Exception: maintain white text inside primary buttons and badges */
+html.light .text-neutral-200 { color: hsl(222 47% 16%) !important; }
+html.light .text-neutral-300 { color: hsl(222 47% 20%) !important; }
+html.light .text-neutral-400 { color: hsl(215 25% 32%) !important; }
+html.light .text-neutral-500 { color: hsl(215 25% 35%) !important; }
+html.light .text-neutral-600 { color: hsl(215 25% 28%) !important; }
+
+html.light .text-gray-400 { color: hsl(215 25% 32%) !important; }
+html.light .text-gray-500 { color: hsl(215 25% 35%) !important; }
+
+html.light .text-indigo-200 { color: hsl(263 70% 45%) !important; }
+html.light .text-indigo-300 { color: hsl(263 75% 40%) !important; }
+html.light .text-indigo-400 { color: hsl(263 80% 42%) !important; }
+html.light .text-violet-400 { color: hsl(263 80% 42%) !important; }
+html.light .text-cyan-400 { color: hsl(190 90% 35%) !important; }
+html.light .text-muted-foreground { color: hsl(var(--muted-foreground)) !important; }
+
+/* Keep white text inside buttons and primary badges */
+html.light button.bg-purple-600,
+html.light button.bg-violet-600,
 html.light button.bg-indigo-600,
-html.light button.bg-indigo-600 *,
-html.light .bg-indigo-500,
-html.light .bg-indigo-500 *,
+html.light button.bg-indigo-500,
+html.light .bg-violet-600,
 html.light .bg-indigo-600,
-html.light .bg-indigo-600 * {
+html.light .bg-primary,
+html.light .bg-primary * {
   color: #ffffff !important;
 }
 
 /* Glassmorphism adjustment for light mode */
 html.light .glass {
-  background: rgba(255, 255, 255, 0.4) !important;
-  border-color: rgba(0, 0, 0, 0.05) !important;
+  background: rgba(255, 255, 255, 0.85) !important;
+  border-color: rgba(168, 85, 247, 0.2) !important;
+  box-shadow: 0 12px 30px -5px rgba(0, 0, 0, 0.08) !important;
 }
+
+
 

@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { calculateLeadScore } from "@/lib/utils";
 
 interface OverviewClientProps {
   userEmail: string;
@@ -201,16 +202,19 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
 
         if (recentLeads) {
           const mappedLeads = recentLeads.map(l => {
-            let score = 30;
-            if (l.email) score += 40;
-            if (l.phone) score += 20;
-            if (l.name && l.name !== "Anonymous") score += 10;
-            if (l.status === "qualified") score += 10;
+            const meta = l.metadata as Record<string, unknown> | null;
+            const score = calculateLeadScore({
+              email: l.email,
+              phone: l.phone,
+              name: l.name,
+              status: l.status,
+              metadata: meta,
+            });
             return {
               id: l.id,
               name: l.name || "Anonymous",
               email: l.email || "",
-              company: l.metadata?.company || "Not specified",
+              company: (meta?.company as string) || "Not specified",
               source: l.source || "chatbot",
               score,
               status: l.status as "new" | "contacted" | "qualified",
@@ -297,88 +301,88 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
   return (
     <div className="space-y-8">
       {/* Welcome Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-border/40 pb-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-violet-500/20 pb-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Dashboard Overview</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Welcome back, <span className="text-white font-medium">{userFullName || userEmail}</span>. Managing <span className="text-indigo-400 font-medium">{tenantName || "Default Workspace"}</span>.
+          <h1 className="text-3xl font-extrabold tracking-tight text-gradient-violet">Dashboard Overview</h1>
+          <p className="text-sm text-muted-foreground mt-1 font-medium">
+            Welcome back, <span className="text-foreground font-semibold">{userFullName || userEmail}</span>. Managing <span className="text-cyan-400 font-semibold">{tenantName || "Default Workspace"}</span>.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs bg-indigo-500/5 border border-indigo-500/10 px-3 py-1.5 rounded-lg text-indigo-300">
-          <Sparkles className="h-3.5 w-3.5 animate-pulse" />
-          AI System Status: Operational
+        <div className="flex items-center gap-2 text-xs bg-gradient-to-r from-violet-500/15 to-cyan-500/15 border border-violet-500/30 px-3.5 py-2 rounded-xl text-violet-300 font-bold shadow-md shadow-violet-500/10">
+          <Sparkles className="h-4 w-4 animate-pulse text-cyan-400" />
+          AI Assistant Operational
         </div>
       </div>
 
       {/* Grid of Stat Cards */}
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {/* Stat Card 1 */}
-        <Card className="hover:border-indigo-500/30 group">
+        <Card className="cyber-card bg-card/85 backdrop-blur-xl shadow-lg transition-all duration-300 group">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-white transition-colors">Total Chat Sessions</CardTitle>
-            <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
+            <CardTitle className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground group-hover:text-foreground transition-colors">Total Chat Sessions</CardTitle>
+            <div className="p-2.5 bg-violet-500/20 rounded-xl text-violet-300 border border-violet-500/30 shadow-inner">
               <MessageSquare className="h-4 w-4" />
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-white tracking-tight">
+            <div className="text-3xl font-extrabold text-foreground tracking-tight">
               {loading ? "..." : stats.sessions}
             </div>
-            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground font-medium">
               <span>All registered chats</span>
             </div>
           </CardContent>
         </Card>
 
         {/* Stat Card 2 */}
-        <Card className="hover:border-indigo-500/30 group">
+        <Card className="cyber-card bg-card/85 backdrop-blur-xl shadow-lg transition-all duration-300 group">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-white transition-colors">Total Messages</CardTitle>
-            <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
+            <CardTitle className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground group-hover:text-foreground transition-colors">Total Messages</CardTitle>
+            <div className="p-2.5 bg-cyan-500/20 rounded-xl text-cyan-300 border border-cyan-500/30 shadow-inner">
               <Activity className="h-4 w-4" />
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-white tracking-tight">
+            <div className="text-3xl font-extrabold text-foreground tracking-tight">
               {loading ? "..." : stats.messages}
             </div>
-            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground font-medium">
               <span>Interactive dialogue nodes</span>
             </div>
           </CardContent>
         </Card>
 
         {/* Stat Card 3 */}
-        <Card className="hover:border-indigo-500/30 group">
+        <Card className="cyber-card bg-card/85 backdrop-blur-xl shadow-lg transition-all duration-300 group">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-white transition-colors">Captured Leads</CardTitle>
-            <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400">
+            <CardTitle className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground group-hover:text-foreground transition-colors">Captured Leads</CardTitle>
+            <div className="p-2.5 bg-emerald-500/20 rounded-xl text-emerald-300 border border-emerald-500/30 shadow-inner">
               <Users className="h-4 w-4" />
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-white tracking-tight">
+            <div className="text-3xl font-extrabold text-foreground tracking-tight">
               {loading ? "..." : stats.leads}
             </div>
-            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground font-medium">
               <span>Qualified customer contacts</span>
             </div>
           </CardContent>
         </Card>
 
         {/* Stat Card 4 */}
-        <Card className="hover:border-indigo-500/30 group">
+        <Card className="cyber-card bg-card/85 backdrop-blur-xl shadow-lg transition-all duration-300 group">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-white transition-colors">Knowledge Sources</CardTitle>
-            <div className="p-2 bg-pink-500/10 rounded-lg text-pink-400">
+            <CardTitle className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground group-hover:text-foreground transition-colors">Knowledge Sources</CardTitle>
+            <div className="p-2.5 bg-amber-500/20 rounded-xl text-amber-300 border border-amber-500/30 shadow-inner">
               <FileText className="h-4 w-4" />
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-white tracking-tight">
+            <div className="text-3xl font-extrabold text-foreground tracking-tight">
               {loading ? "..." : stats.sources}
             </div>
-            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground font-medium">
               <span>Indexed files & links</span>
             </div>
           </CardContent>
@@ -388,25 +392,29 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
       {/* Chart and Activity Section */}
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Main Chart */}
-        <Card className="lg:col-span-2">
+        <Card className="lg:col-span-2 cyber-card bg-card/85 backdrop-blur-xl shadow-lg">
           <CardHeader className="flex flex-row items-center justify-between pb-4">
             <div>
-              <CardTitle className="text-md font-semibold">Performance Analytics</CardTitle>
-              <CardDescription>Visual metrics over the past 7 days</CardDescription>
+              <CardTitle className="text-base font-extrabold text-foreground">Performance Analytics</CardTitle>
+              <CardDescription className="text-muted-foreground font-medium">Visual metrics over the past 7 days</CardDescription>
             </div>
-            <div className="flex bg-[#121217] border border-border p-0.5 rounded-lg">
+            <div className="flex bg-muted/60 border border-violet-500/20 p-1 rounded-xl shadow-inner">
               <button
                 onClick={() => setActiveMetric("sessions")}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                  activeMetric === "sessions" ? "bg-indigo-500 text-white shadow-sm" : "text-muted-foreground hover:text-white"
+                className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                  activeMetric === "sessions" 
+                    ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-500/20" 
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 Sessions
               </button>
               <button
                 onClick={() => setActiveMetric("leads")}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                  activeMetric === "leads" ? "bg-indigo-500 text-white shadow-sm" : "text-muted-foreground hover:text-white"
+                className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                  activeMetric === "leads" 
+                    ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-500/20" 
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 Leads
@@ -419,30 +427,35 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
               <svg className="w-full h-full overflow-visible" viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none">
                 <defs>
                   <linearGradient id="chart-grad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25" />
-                    <stop offset="100%" stopColor="#6366f1" stopOpacity="0.0" />
+                    <stop offset="0%" stopColor="#a855f7" stopOpacity="0.4" />
+                    <stop offset="50%" stopColor="#06b6d4" stopOpacity="0.15" />
+                    <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.0" />
+                  </linearGradient>
+                  <linearGradient id="stroke-grad" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#a855f7" />
+                    <stop offset="100%" stopColor="#06b6d4" />
                   </linearGradient>
                 </defs>
 
                 {/* Gridlines */}
-                <line x1={padding} y1={padding} x2={chartWidth - padding} y2={padding} stroke="rgba(255,255,255,0.05)" strokeDasharray="3,3" />
-                <line x1={padding} y1={chartHeight / 2} x2={chartWidth - padding} y2={chartHeight / 2} stroke="rgba(255,255,255,0.05)" strokeDasharray="3,3" />
-                <line x1={padding} y1={chartHeight - padding} x2={chartWidth - padding} y2={chartHeight - padding} stroke="rgba(255,255,255,0.08)" />
+                <line x1={padding} y1={padding} x2={chartWidth - padding} y2={padding} stroke="currentColor" className="text-border/40" strokeDasharray="3,3" />
+                <line x1={padding} y1={chartHeight / 2} x2={chartWidth - padding} y2={chartHeight / 2} stroke="currentColor" className="text-border/40" strokeDasharray="3,3" />
+                <line x1={padding} y1={chartHeight - padding} x2={chartWidth - padding} y2={chartHeight - padding} stroke="currentColor" className="text-border/80" />
 
                 {/* Shaded Area */}
                 <path d={areaD} fill="url(#chart-grad)" />
 
                 {/* Trend Line */}
-                <path d={pathD} fill="none" stroke="#818cf8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                <path d={pathD} fill="none" stroke="url(#stroke-grad)" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
 
-                {/* Data Points / Pulsing Hover effects */}
+                {/* Data Points */}
                 {points.map((p, idx) => (
                   <g key={idx} className="group/dot cursor-pointer">
-                    <circle cx={p.x} cy={p.y} r="4.5" fill="#09090b" stroke="#818cf8" strokeWidth="2" />
-                    <circle cx={p.x} cy={p.y} r="9" fill="#818cf8" className="opacity-0 group-hover/dot:opacity-20 transition-opacity" />
+                    <circle cx={p.x} cy={p.y} r="5" className="fill-background stroke-cyan-400" strokeWidth="2.5" />
+                    <circle cx={p.x} cy={p.y} r="10" fill="#06b6d4" className="opacity-0 group-hover/dot:opacity-30 transition-opacity" />
                     {/* Tooltip */}
                     <foreignObject x={p.x - 25} y={p.y - 32} width="50" height="24" className="overflow-visible opacity-0 group-hover/dot:opacity-100 transition-opacity duration-200">
-                      <div className="bg-[#121217] border border-indigo-500/30 text-[10px] font-bold text-white text-center rounded px-1 py-0.5 shadow-md">
+                      <div className="bg-popover border border-cyan-500/40 text-[11px] font-extrabold text-cyan-300 text-center rounded-md px-1.5 py-0.5 shadow-lg">
                         {p.val}
                       </div>
                     </foreignObject>
@@ -452,7 +465,7 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
             </div>
 
             {/* Labels */}
-            <div className="flex justify-between text-[11px] font-medium text-muted-foreground px-5 border-t border-border/10 pt-2">
+            <div className="flex justify-between text-[11px] font-bold text-muted-foreground px-5 border-t border-border/40 pt-2.5">
               {chartLabels.map((label, idx) => (
                 <span key={idx}>{label}</span>
               ))}
@@ -461,32 +474,32 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
         </Card>
 
         {/* Activity Timeline */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-md font-semibold">Live System Logs</CardTitle>
-            <CardDescription>Real-time autonomous events</CardDescription>
+        <Card className="glow-card border-border/70 bg-card/80 backdrop-blur-md shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-bold text-foreground">Live System Logs</CardTitle>
+            <CardDescription className="text-muted-foreground font-medium">Real-time autonomous events</CardDescription>
           </CardHeader>
-          <CardContent className="pt-2">
+          <CardContent className="pt-1">
             <div className="space-y-4">
               {activities.map((act) => {
                 const Icon = act.icon;
                 return (
                   <div key={act.id} className="flex gap-3 text-xs leading-relaxed group">
                     <div className="flex flex-col items-center">
-                      <div className={`p-1.5 rounded-lg border border-white/5 shadow-sm ${act.color} group-hover:scale-110 transition-transform`}>
-                        <Icon className="h-3.5 w-3.5" />
+                      <div className={`p-1.5 rounded-xl border border-border/60 shadow-sm ${act.color} group-hover:scale-110 transition-transform`}>
+                        <Icon className="h-4 w-4" />
                       </div>
-                      <div className="w-[1px] flex-1 bg-border/25 mt-2 group-last:hidden" />
+                      <div className="w-[1px] flex-1 bg-border/40 mt-2 group-last:hidden" />
                     </div>
                     <div className="flex-1 space-y-0.5 pt-0.5">
                       <div className="flex justify-between items-center gap-2">
-                        <span className="font-semibold text-white group-hover:text-indigo-300 transition-colors">{act.title}</span>
-                        <span className="text-[10px] text-muted-foreground flex items-center gap-1 shrink-0">
+                        <span className="font-bold text-foreground group-hover:text-indigo-500 transition-colors">{act.title}</span>
+                        <span className="text-[10px] text-muted-foreground flex items-center gap-1 shrink-0 font-medium">
                           <Clock className="h-3 w-3" />
                           {act.time}
                         </span>
                       </div>
-                      <p className="text-[11px] text-muted-foreground font-normal">{act.description}</p>
+                      <p className="text-[11px] text-muted-foreground font-medium">{act.description}</p>
                     </div>
                   </div>
                 );
@@ -499,17 +512,17 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
       {/* Lower Tables Section */}
       <div className="grid gap-6 md:grid-cols-2">
         {/* Recent Conversations */}
-        <Card className="flex flex-col justify-between">
+        <Card className="glow-card border-border/70 bg-card/80 backdrop-blur-md flex flex-col justify-between shadow-sm">
           <div>
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <div>
-                <CardTitle className="text-md font-semibold">Recent Conversations</CardTitle>
-                <CardDescription>Live active visitor queries</CardDescription>
+                <CardTitle className="text-base font-bold text-foreground">Recent Conversations</CardTitle>
+                <CardDescription className="text-muted-foreground font-medium">Live active visitor queries</CardDescription>
               </div>
-              <Button variant="outline" size="sm" className="text-xs hover:border-indigo-500/30 gap-1.5" asChild>
+              <Button variant="outline" size="sm" className="text-xs hover:border-indigo-500/40 gap-1.5 font-semibold" asChild>
                 <Link href="/dashboard/chats">
                   <span>View Inbox</span>
-                  <ArrowRight className="h-3 w-3 inline ml-1" />
+                  <ArrowRight className="h-3.5 w-3.5 inline ml-0.5" />
                 </Link>
               </Button>
             </CardHeader>
@@ -517,37 +530,37 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
-                    <tr className="border-b border-border/40 text-[10px] font-bold uppercase tracking-wider text-muted-foreground pb-2">
+                    <tr className="border-b border-border/60 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground pb-2">
                       <th className="py-2.5">Visitor</th>
                       <th className="py-2.5 max-w-[150px] truncate">Last Message</th>
                       <th className="py-2.5">Status</th>
                       <th className="py-2.5 text-right">Sentiment</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border/20">
+                  <tbody className="divide-y divide-border/40">
                     {recentConvs.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="py-6 text-center text-muted-foreground text-xs">
+                        <td colSpan={4} className="py-6 text-center text-muted-foreground font-medium text-xs">
                           No active conversations recorded yet.
                         </td>
                       </tr>
                     ) : (
                       recentConvs.map((conv) => (
-                        <tr key={conv.id} className="hover:bg-white/5 transition-colors group">
-                          <td className="py-3 font-semibold text-white flex items-center gap-1.5">
-                            <span className={`h-1.5 w-1.5 rounded-full ${conv.status === "open" ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground"}`} />
+                        <tr key={conv.id} className="hover:bg-muted/50 transition-colors group">
+                          <td className="py-3 font-bold text-foreground flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${conv.status === "open" ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground"}`} />
                             {conv.visitor}
                           </td>
-                          <td className="py-3 text-muted-foreground truncate max-w-[160px]">{conv.lastMessage}</td>
+                          <td className="py-3 text-muted-foreground font-medium truncate max-w-[160px]">{conv.lastMessage}</td>
                           <td className="py-3">
-                            <Badge variant={conv.status === "open" ? "info" : "secondary"} className="text-[9px] uppercase tracking-wider px-1.5 py-0 font-bold">
+                            <Badge variant={conv.status === "open" ? "info" : "secondary"} className="text-[9px] uppercase tracking-wider px-2 py-0.5 font-bold">
                               {conv.status}
                             </Badge>
                           </td>
                           <td className="py-3 text-right">
                             <Badge 
                               variant={conv.sentiment === "positive" ? "success" : conv.sentiment === "negative" ? "destructive" : "outline"} 
-                              className="text-[9px] capitalize px-1.5 py-0 font-bold"
+                              className="text-[9px] capitalize px-2 py-0.5 font-bold"
                             >
                               {conv.sentiment}
                             </Badge>
@@ -563,17 +576,17 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
         </Card>
 
         {/* Recent Leads */}
-        <Card className="flex flex-col justify-between">
+        <Card className="glow-card border-border/70 bg-card/80 backdrop-blur-md flex flex-col justify-between shadow-sm">
           <div>
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <div>
-                <CardTitle className="text-md font-semibold">Leads Pipeline</CardTitle>
-                <CardDescription>Latest contact details captured</CardDescription>
+                <CardTitle className="text-base font-bold text-foreground">Leads Pipeline</CardTitle>
+                <CardDescription className="text-muted-foreground font-medium">Latest contact details captured</CardDescription>
               </div>
-              <Button variant="outline" size="sm" className="text-xs hover:border-indigo-500/30 gap-1.5" asChild>
+              <Button variant="outline" size="sm" className="text-xs hover:border-indigo-500/40 gap-1.5 font-semibold" asChild>
                 <Link href="/dashboard/leads">
                   <span>View Leads</span>
-                  <ArrowRight className="h-3 w-3 inline ml-1" />
+                  <ArrowRight className="h-3.5 w-3.5 inline ml-0.5" />
                 </Link>
               </Button>
             </CardHeader>
@@ -581,37 +594,37 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
-                    <tr className="border-b border-border/40 text-[10px] font-bold uppercase tracking-wider text-muted-foreground pb-2">
+                    <tr className="border-b border-border/60 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground pb-2">
                       <th className="py-2.5">Lead Name</th>
                       <th className="py-2.5">Company</th>
                       <th className="py-2.5">Source</th>
                       <th className="py-2.5 text-right">Score</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border/20">
+                  <tbody className="divide-y divide-border/40">
                     {recentLeadsList.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="py-6 text-center text-muted-foreground text-xs">
+                        <td colSpan={4} className="py-6 text-center text-muted-foreground font-medium text-xs">
                           No leads captured yet.
                         </td>
                       </tr>
                     ) : (
                       recentLeadsList.map((lead) => (
-                        <tr key={lead.id} className="hover:bg-white/5 transition-colors">
-                          <td className="py-3 font-semibold text-white">
+                        <tr key={lead.id} className="hover:bg-muted/50 transition-colors">
+                          <td className="py-3 font-bold text-foreground">
                             <div className="flex flex-col">
                               <span>{lead.name}</span>
-                              <span className="text-[10px] text-muted-foreground font-normal">{lead.email}</span>
+                              <span className="text-[11px] text-muted-foreground font-normal">{lead.email}</span>
                             </div>
                           </td>
-                          <td className="py-3 text-muted-foreground">{lead.company}</td>
+                          <td className="py-3 text-muted-foreground font-medium">{lead.company}</td>
                           <td className="py-3">
-                            <span className="font-mono text-[10px] bg-white/5 border border-white/5 rounded px-1.5 py-0.5 text-neutral-300">
+                            <span className="font-mono text-[10px] bg-muted/80 border border-border/60 rounded-md px-2 py-0.5 text-foreground font-medium">
                               {lead.source}
                             </span>
                           </td>
                           <td className="py-3 text-right">
-                            <Badge variant={lead.score >= 80 ? "success" : "warning"} className="text-[9px] px-1.5 py-0 font-mono font-bold">
+                            <Badge variant={lead.score >= 80 ? "success" : "warning"} className="text-[9px] px-2 py-0.5 font-mono font-bold">
                               {lead.score}/100
                             </Badge>
                           </td>
