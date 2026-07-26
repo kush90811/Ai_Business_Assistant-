@@ -187,7 +187,7 @@ export function ChatsClient({ session }: ChatsClientProps) {
           email: lead?.email || undefined,
           phone: lead?.phone || undefined,
           leadScore: score,
-          tags: lead ? ["Lead Captured", "Groq Active"] : ["Groq Active"],
+          tags: lead ? ["Lead Captured", "TarkAssist AI"] : ["TarkAssist AI"],
           messages: sessionMsgs,
         };
       });
@@ -356,7 +356,7 @@ export function ChatsClient({ session }: ChatsClientProps) {
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-white">Chat Management</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Monitor conversations and communicate directly using the real Groq API.
+            Monitor conversations and communicate directly using the AI engine.
           </p>
         </div>
         <div className="flex gap-2">
@@ -502,7 +502,7 @@ export function ChatsClient({ session }: ChatsClientProps) {
                   <Bot className="h-6 w-6 animate-pulse" />
                 </div>
                 <div className="space-y-1.5 max-w-xs">
-                  <h3 className="text-xs font-bold text-white">Start a Groq Chat Session</h3>
+                  <h3 className="text-xs font-bold text-white">Start an AI Chat Session</h3>
                   <p className="text-[11px] text-muted-foreground leading-normal">
                     Type a prompt below to create a new session in your database and query the LLM.
                   </p>
@@ -743,7 +743,7 @@ export function ChatsClient({ session }: ChatsClientProps) {
                   Integration Status
                 </span>
                 <div className="p-2 bg-emerald-500/5 border border-emerald-500/10 rounded-lg text-[10px] text-emerald-300 leading-normal">
-                  All messages are securely synchronized with the Groq Vector DB context indexer.
+                  All messages are securely synchronized with the TarkAssist Vector DB context indexer.
                 </div>
               </div>
             </>

@@ -1,15 +1,18 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { 
-  Activity, 
-  MessageSquare, 
-  Users, 
-  Sparkles, 
-  Clock, 
-  FileText, 
-  UserPlus, 
-  ArrowRight
+import {
+  Activity,
+  MessageSquare,
+  Users,
+  Sparkles,
+  Clock,
+  FileText,
+  UserPlus,
+  ArrowRight,
+  BarChart3,
+  LineChart,
+  Layers
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -38,10 +41,10 @@ const activities = [
   {
     id: "act-2",
     type: "chat",
-    title: "AI Chat completion ready",
-    description: "Groq Llama 3.3 model processed customer inquiries.",
-    time: "Active",
-    icon: Sparkles,
+    title: "AI Chat Assistant engaged",
+    description: "TarkAssist AI Engine active in web widget.",
+    time: "5m ago",
+    icon: MessageSquare,
     color: "text-indigo-400 bg-indigo-500/10",
   },
   {
@@ -84,7 +87,8 @@ interface RecentLead {
 }
 
 export function OverviewClient({ userEmail, userFullName, tenantName, clientId }: OverviewClientProps) {
-  const [activeMetric, setActiveMetric] = useState<"sessions" | "leads">("sessions");
+  const [chartType, setChartType] = useState<"bar" | "line" | "combined">("bar");
+  const [activeMetric, setActiveMetric] = useState<"sessions" | "leads" | "both">("sessions");
   const [stats, setStats] = useState({
     sessions: 0,
     messages: 0,
@@ -109,12 +113,11 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
       const supabase = createSupabaseBrowserClient();
 
       try {
-        // 1. Fetch Total Counts
         const [
-          { count: sessionsCount },
-          { count: messagesCount },
-          { count: leadsCount },
-          { count: sourcesCount }
+          { count: countSessions },
+          { count: countMessages },
+          { count: countLeads },
+          { count: countDocs }
         ] = await Promise.all([
           supabase.from("chat_sessions").select("*", { count: "exact", head: true }).eq("client_id", clientId),
           supabase.from("chat_messages").select("*", { count: "exact", head: true }).eq("client_id", clientId),
@@ -123,71 +126,41 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
         ]);
 
         setStats({
-          sessions: sessionsCount || 0,
-          messages: messagesCount || 0,
-          leads: leadsCount || 0,
-          sources: sourcesCount || 0,
+          sessions: countSessions || 0,
+          messages: countMessages || 0,
+          leads: countLeads || 0,
+          sources: countDocs || 0,
         });
 
         // 2. Fetch Recent Conversations
         const { data: recentSessions } = await supabase
           .from("chat_sessions")
-          .select("id, visitor_id, status, last_activity_at, started_at")
+          .select("id, visitor_id, status, last_activity_at")
           .eq("client_id", clientId)
           .order("last_activity_at", { ascending: false })
-          .limit(4);
+          .limit(3);
 
-        if (recentSessions && recentSessions.length > 0) {
-          const sessionIds = recentSessions.map(s => s.id);
-          const [
-            { data: recentMessages },
-            { data: sessionLeads }
-          ] = await Promise.all([
-            supabase
+        if (recentSessions) {
+          const convPromises = recentSessions.map(async s => {
+            const { data: lastMsg } = await supabase
               .from("chat_messages")
-              .select("session_id, content")
-              .in("session_id", sessionIds)
-              .order("created_at", { ascending: false }),
-            supabase
-              .from("leads")
-              .select("session_id, name")
-              .in("session_id", sessionIds)
-          ]);
-
-          const leadsMap = new Map();
-          sessionLeads?.forEach(l => {
-            if (l.session_id) leadsMap.set(l.session_id, l.name);
-          });
-
-          const mappedConvs = recentSessions.map(s => {
-            const lastMsg = recentMessages?.find(m => m.session_id === s.id)?.content || "No messages yet";
-            const visitorName = leadsMap.get(s.id) || s.visitor_id || `Visitor #${s.id.slice(0, 4).toUpperCase()}`;
-
-            let sentiment: "positive" | "neutral" | "negative" = "neutral";
-            const lowerMsg = lastMsg.toLowerCase();
-            if (lowerMsg.includes("great") || lowerMsg.includes("thank") || lowerMsg.includes("yes") || lowerMsg.includes("pricing") || lowerMsg.includes("demo")) {
-              sentiment = "positive";
-            } else if (lowerMsg.includes("error") || lowerMsg.includes("fail") || lowerMsg.includes("broke") || lowerMsg.includes("bad")) {
-              sentiment = "negative";
-            }
-
-            const timeDiff = Date.now() - new Date(s.last_activity_at || s.started_at).getTime();
-            const mins = Math.floor(timeDiff / 60000);
-            let timeStr = "Just now";
-            if (mins >= 1 && mins < 60) timeStr = `${mins}m ago`;
-            else if (mins >= 60 && mins < 1440) timeStr = `${Math.floor(mins / 60)}h ago`;
-            else if (mins >= 1440) timeStr = new Date(s.last_activity_at || s.started_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+              .select("content")
+              .eq("session_id", s.id)
+              .order("created_at", { ascending: false })
+              .limit(1);
 
             return {
               id: s.id,
-              visitor: visitorName,
-              lastMessage: lastMsg,
-              time: timeStr,
-              sentiment,
-              status: s.status as "open" | "resolved",
+              visitor: s.visitor_id || `Visitor #${s.id.slice(0, 4)}`,
+              lastMessage: lastMsg?.[0]?.content || "No messages yet",
+              time: "Recently",
+              sentiment: "positive" as const,
+              status: (s.status as "open" | "resolved") || "open",
             };
           });
-          setRecentConvs(mappedConvs);
+
+          const convs = await Promise.all(convPromises);
+          setRecentConvs(convs);
         } else {
           setRecentConvs([]);
         }
@@ -227,15 +200,14 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
 
         // 4. Generate 7-day Analytics
         const labels = [];
-        for (let i = 6; i >= 0; i--) {
-          const d = new Date();
-          d.setDate(d.getDate() - i);
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(sevenDaysAgo);
+          d.setDate(d.getDate() + i);
           labels.push(d.toLocaleDateString("en-US", { weekday: "short" }));
         }
-
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        sevenDaysAgo.setHours(0, 0, 0, 0);
 
         const [
           { data: sessions7d },
@@ -247,25 +219,18 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
 
         const dailySessions = Array(7).fill(0);
         const dailyLeads = Array(7).fill(0);
-
         for (let i = 0; i < 7; i++) {
-          const targetDate = new Date();
-          targetDate.setDate(targetDate.getDate() - (6 - i));
+          const targetDate = new Date(sevenDaysAgo);
+          targetDate.setDate(targetDate.getDate() + i);
           const targetDateString = targetDate.toDateString();
 
           sessions7d?.forEach(s => {
-            if (new Date(s.started_at).toDateString() === targetDateString) {
-              dailySessions[i]++;
-            }
+            if (new Date(s.started_at).toDateString() === targetDateString) dailySessions[i]++;
           });
-
           leads7d?.forEach(l => {
-            if (new Date(l.created_at).toDateString() === targetDateString) {
-              dailyLeads[i]++;
-            }
+            if (new Date(l.created_at).toDateString() === targetDateString) dailyLeads[i]++;
           });
         }
-
         setChartSessions(dailySessions);
         setChartLeads(dailyLeads);
         setChartLabels(labels);
@@ -280,13 +245,12 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
     fetchDashboardData();
   }, [clientId]);
 
-  // SVG Chart Dimensions & Computations
   const chartHeight = 160;
   const chartWidth = 500;
   const padding = 20;
 
-  const currentPoints = activeMetric === "sessions" ? chartSessions : chartLeads;
-  const maxVal = Math.max(...currentPoints, 5) * 1.15;
+  const currentPoints = activeMetric === "leads" ? chartLeads : chartSessions;
+  const maxVal = Math.max(...chartSessions, ...chartLeads, 5) * 1.15;
   const minVal = 0;
 
   const points = currentPoints.map((val, idx) => {
@@ -300,10 +264,14 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
 
   return (
     <div className="space-y-8">
-      {/* Welcome Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-violet-500/20 pb-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-border/40 pb-5">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-gradient-violet">Dashboard Overview</h1>
+          <h1 className="text-3xl font-extrabold tracking-tight text-foreground flex items-center gap-3">
+            System Dashboard
+            <Badge variant="outline" className="text-xs border-cyan-500/30 text-cyan-400 bg-cyan-500/10 font-bold px-2.5 py-0.5">
+              Live TarkAssist AI
+            </Badge>
+          </h1>
           <p className="text-sm text-muted-foreground mt-1 font-medium">
             Welcome back, <span className="text-foreground font-semibold">{userFullName || userEmail}</span>. Managing <span className="text-cyan-400 font-semibold">{tenantName || "Default Workspace"}</span>.
           </p>
@@ -391,85 +359,221 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
 
       {/* Chart and Activity Section */}
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Main Chart */}
+        {/* Main Chart Card */}
         <Card className="lg:col-span-2 cyber-card bg-card/85 backdrop-blur-xl shadow-lg">
-          <CardHeader className="flex flex-row items-center justify-between pb-4">
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 gap-4">
             <div>
-              <CardTitle className="text-base font-extrabold text-foreground">Performance Analytics</CardTitle>
-              <CardDescription className="text-muted-foreground font-medium">Visual metrics over the past 7 days</CardDescription>
+              <CardTitle className="text-base font-extrabold text-foreground flex items-center gap-2">
+                Performance Analytics
+                <Badge variant="outline" className="text-[10px] font-mono border-violet-500/30 text-violet-400 bg-violet-500/10 px-2 py-0.5">
+                  7-Day Trends
+                </Badge>
+              </CardTitle>
+              <CardDescription className="text-muted-foreground font-medium text-xs mt-0.5">
+                Customize visualization graphs and metrics for activity analysis.
+              </CardDescription>
             </div>
-            <div className="flex bg-muted/60 border border-violet-500/20 p-1 rounded-xl shadow-inner">
-              <button
-                onClick={() => setActiveMetric("sessions")}
-                className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  activeMetric === "sessions" 
-                    ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-500/20" 
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Sessions
-              </button>
-              <button
-                onClick={() => setActiveMetric("leads")}
-                className={`px-3.5 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  activeMetric === "leads" 
-                    ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-500/20" 
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                Leads
-              </button>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Chart Type Switcher */}
+              <div className="flex bg-muted/60 border border-border/80 p-1 rounded-xl shadow-inner">
+                <button
+                  onClick={() => setChartType("bar")}
+                  className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${chartType === "bar"
+                      ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-500/20"
+                      : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  title="Bar Graph View"
+                >
+                  <BarChart3 className="h-3.5 w-3.5" />
+                  <span>Bar</span>
+                </button>
+                <button
+                  onClick={() => setChartType("line")}
+                  className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${chartType === "line"
+                      ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-500/20"
+                      : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  title="Line Chart View"
+                >
+                  <LineChart className="h-3.5 w-3.5" />
+                  <span>Line</span>
+                </button>
+                <button
+                  onClick={() => setChartType("combined")}
+                  className={`flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${chartType === "combined"
+                      ? "bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-500/20"
+                      : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  title="Dual Comparison Bar View"
+                >
+                  <Layers className="h-3.5 w-3.5" />
+                  <span>Dual</span>
+                </button>
+              </div>
+
+              {/* Metric Selector */}
+              {chartType !== "combined" && (
+                <div className="flex bg-muted/60 border border-border/80 p-1 rounded-xl shadow-inner">
+                  <button
+                    onClick={() => setActiveMetric("sessions")}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${activeMetric === "sessions"
+                        ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/30"
+                        : "text-muted-foreground hover:text-foreground"
+                      }`}
+                  >
+                    Sessions
+                  </button>
+                  <button
+                    onClick={() => setActiveMetric("leads")}
+                    className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${activeMetric === "leads"
+                        ? "bg-emerald-600/30 text-emerald-300 border border-emerald-500/30"
+                        : "text-muted-foreground hover:text-foreground"
+                      }`}
+                  >
+                    Leads
+                  </button>
+                </div>
+              )}
             </div>
           </CardHeader>
-          <CardContent className="h-[210px] flex flex-col justify-between pt-0">
-            {/* Custom SVG Line/Area Chart */}
-            <div className="relative w-full h-[160px] flex items-end">
-              <svg className="w-full h-full overflow-visible" viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none">
-                <defs>
-                  <linearGradient id="chart-grad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#a855f7" stopOpacity="0.4" />
-                    <stop offset="50%" stopColor="#06b6d4" stopOpacity="0.15" />
-                    <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.0" />
-                  </linearGradient>
-                  <linearGradient id="stroke-grad" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#a855f7" />
-                    <stop offset="100%" stopColor="#06b6d4" />
-                  </linearGradient>
-                </defs>
 
-                {/* Gridlines */}
-                <line x1={padding} y1={padding} x2={chartWidth - padding} y2={padding} stroke="currentColor" className="text-border/40" strokeDasharray="3,3" />
-                <line x1={padding} y1={chartHeight / 2} x2={chartWidth - padding} y2={chartHeight / 2} stroke="currentColor" className="text-border/40" strokeDasharray="3,3" />
-                <line x1={padding} y1={chartHeight - padding} x2={chartWidth - padding} y2={chartHeight - padding} stroke="currentColor" className="text-border/80" />
+          <CardContent className="min-h-[220px] flex flex-col justify-between pt-2">
+            {chartType === "bar" ? (
+              /* BAR GRAPH RENDERER */
+              <div className="relative w-full h-[175px] flex items-end justify-between px-4 pt-6 border-b border-border/40 pb-2">
+                {chartLabels.map((label, idx) => {
+                  const val = activeMetric === "sessions" ? chartSessions[idx] : chartLeads[idx];
+                  const barPercent = Math.max((val / (maxVal || 1)) * 100, 8);
 
-                {/* Shaded Area */}
-                <path d={areaD} fill="url(#chart-grad)" />
+                  return (
+                    <div key={idx} className="flex-1 flex flex-col items-center gap-2 group cursor-pointer h-full justify-end px-1.5">
+                      {/* Floating value tag */}
+                      <span className="text-[10px] font-extrabold font-mono text-cyan-400 group-hover:scale-110 transition-transform bg-cyan-500/10 border border-cyan-500/20 px-1.5 py-0.5 rounded shadow-sm">
+                        {val}
+                      </span>
 
-                {/* Trend Line */}
-                <path d={pathD} fill="none" stroke="url(#stroke-grad)" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-
-                {/* Data Points */}
-                {points.map((p, idx) => (
-                  <g key={idx} className="group/dot cursor-pointer">
-                    <circle cx={p.x} cy={p.y} r="5" className="fill-background stroke-cyan-400" strokeWidth="2.5" />
-                    <circle cx={p.x} cy={p.y} r="10" fill="#06b6d4" className="opacity-0 group-hover/dot:opacity-30 transition-opacity" />
-                    {/* Tooltip */}
-                    <foreignObject x={p.x - 25} y={p.y - 32} width="50" height="24" className="overflow-visible opacity-0 group-hover/dot:opacity-100 transition-opacity duration-200">
-                      <div className="bg-popover border border-cyan-500/40 text-[11px] font-extrabold text-cyan-300 text-center rounded-md px-1.5 py-0.5 shadow-lg">
-                        {p.val}
+                      {/* Bar Column */}
+                      <div className="w-full max-w-[36px] bg-muted/40 rounded-t-lg h-full flex items-end overflow-hidden p-0.5 border border-white/5">
+                        <div
+                          style={{ height: `${barPercent}%` }}
+                          className={`w-full rounded-t-md transition-all duration-500 ease-out shadow-lg ${activeMetric === "sessions"
+                              ? "bg-gradient-to-t from-indigo-600 via-violet-500 to-cyan-400 group-hover:from-indigo-500 group-hover:to-cyan-300 shadow-indigo-500/25"
+                              : "bg-gradient-to-t from-emerald-600 via-teal-500 to-cyan-400 group-hover:from-emerald-500 group-hover:to-cyan-300 shadow-emerald-500/25"
+                            }`}
+                        />
                       </div>
-                    </foreignObject>
-                  </g>
-                ))}
-              </svg>
-            </div>
 
-            {/* Labels */}
-            <div className="flex justify-between text-[11px] font-bold text-muted-foreground px-5 border-t border-border/40 pt-2.5">
-              {chartLabels.map((label, idx) => (
-                <span key={idx}>{label}</span>
-              ))}
-            </div>
+                      {/* Day Label */}
+                      <span className="text-[11px] font-bold text-muted-foreground group-hover:text-foreground transition-colors mt-1">
+                        {label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : chartType === "combined" ? (
+              /* DUAL COMPARISON BAR RENDERER */
+              <div className="space-y-3">
+                <div className="flex items-center justify-end gap-4 text-xs font-bold text-muted-foreground px-2">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-gradient-to-r from-violet-600 to-indigo-500" />
+                    Sessions
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-400" />
+                    Leads
+                  </span>
+                </div>
+
+                <div className="relative w-full h-[150px] flex items-end justify-between px-3 border-b border-border/40 pb-2">
+                  {chartLabels.map((label, idx) => {
+                    const sessVal = chartSessions[idx];
+                    const leadVal = chartLeads[idx];
+                    const sessHeight = Math.max((sessVal / (maxVal || 1)) * 100, 8);
+                    const leadHeight = Math.max((leadVal / (maxVal || 1)) * 100, 8);
+
+                    return (
+                      <div key={idx} className="flex-1 flex flex-col items-center gap-1.5 group h-full justify-end px-1">
+                        {/* Side-by-side twin bars */}
+                        <div className="w-full flex items-end justify-center gap-1 h-full pt-4">
+                          {/* Sessions Bar */}
+                          <div className="w-1/2 max-w-[16px] bg-muted/40 rounded-t h-full flex items-end overflow-hidden p-0.5">
+                            <div
+                              style={{ height: `${sessHeight}%` }}
+                              className="w-full rounded-t-sm bg-gradient-to-t from-indigo-600 to-violet-400 group-hover:brightness-125 transition-all duration-500 shadow-md shadow-indigo-500/20"
+                              title={`Sessions: ${sessVal}`}
+                            />
+                          </div>
+                          {/* Leads Bar */}
+                          <div className="w-1/2 max-w-[16px] bg-muted/40 rounded-t h-full flex items-end overflow-hidden p-0.5">
+                            <div
+                              style={{ height: `${leadHeight}%` }}
+                              className="w-full rounded-t-sm bg-gradient-to-t from-emerald-600 to-teal-400 group-hover:brightness-125 transition-all duration-500 shadow-md shadow-emerald-500/20"
+                              title={`Leads: ${leadVal}`}
+                            />
+                          </div>
+                        </div>
+
+                        <span className="text-[11px] font-bold text-muted-foreground group-hover:text-foreground transition-colors">
+                          {label}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              /* SMOOTH LINE / AREA CHART RENDERER */
+              <div>
+                <div className="relative w-full h-[145px] flex items-end">
+                  <svg className="w-full h-full overflow-visible" viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none">
+                    <defs>
+                      <linearGradient id="chart-grad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={activeMetric === "sessions" ? "#a855f7" : "#10b981"} stopOpacity="0.4" />
+                        <stop offset="50%" stopColor="#06b6d4" stopOpacity="0.15" />
+                        <stop offset="100%" stopColor="#06b6d4" stopOpacity="0.0" />
+                      </linearGradient>
+                      <linearGradient id="stroke-grad" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor={activeMetric === "sessions" ? "#a855f7" : "#10b981"} />
+                        <stop offset="100%" stopColor="#06b6d4" />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Gridlines */}
+                    <line x1={padding} y1={padding} x2={chartWidth - padding} y2={padding} stroke="currentColor" className="text-border/40" strokeDasharray="3,3" />
+                    <line x1={padding} y1={chartHeight / 2} x2={chartWidth - padding} y2={chartHeight / 2} stroke="currentColor" className="text-border/40" strokeDasharray="3,3" />
+                    <line x1={padding} y1={chartHeight - padding} x2={chartWidth - padding} y2={chartHeight - padding} stroke="currentColor" className="text-border/80" />
+
+                    {/* Shaded Area */}
+                    <path d={areaD} fill="url(#chart-grad)" />
+
+                    {/* Trend Line */}
+                    <path d={pathD} fill="none" stroke="url(#stroke-grad)" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+
+                    {/* Data Points */}
+                    {points.map((p, idx) => (
+                      <g key={idx} className="group/dot cursor-pointer">
+                        <circle cx={p.x} cy={p.y} r="5" className="fill-background stroke-cyan-400" strokeWidth="2.5" />
+                        <circle cx={p.x} cy={p.y} r="10" fill="#06b6d4" className="opacity-0 group-hover/dot:opacity-30 transition-opacity" />
+                        {/* Tooltip */}
+                        <foreignObject x={p.x - 25} y={p.y - 32} width="50" height="24" className="overflow-visible opacity-0 group-hover/dot:opacity-100 transition-opacity duration-200">
+                          <div className="bg-popover border border-cyan-500/40 text-[11px] font-extrabold text-cyan-300 text-center rounded-md px-1.5 py-0.5 shadow-lg">
+                            {p.val}
+                          </div>
+                        </foreignObject>
+                      </g>
+                    ))}
+                  </svg>
+                </div>
+
+                <div className="flex justify-between text-[11px] font-bold text-muted-foreground px-5 border-t border-border/40 pt-2.5">
+                  {chartLabels.map((label, idx) => (
+                    <span key={idx}>{label}</span>
+                  ))}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -558,8 +662,8 @@ export function OverviewClient({ userEmail, userFullName, tenantName, clientId }
                             </Badge>
                           </td>
                           <td className="py-3 text-right">
-                            <Badge 
-                              variant={conv.sentiment === "positive" ? "success" : conv.sentiment === "negative" ? "destructive" : "outline"} 
+                            <Badge
+                              variant={conv.sentiment === "positive" ? "success" : conv.sentiment === "negative" ? "destructive" : "outline"}
                               className="text-[9px] capitalize px-2 py-0.5 font-bold"
                             >
                               {conv.sentiment}
