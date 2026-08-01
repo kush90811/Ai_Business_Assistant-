@@ -6,16 +6,24 @@ import type { AuthState, SessionContext } from "@/types/auth";
 
 export const getAuthState = cache(async (): Promise<AuthState> => {
   const supabase = await createSupabaseServerClient();
+
+  // Fast 0ms local JWT cookie session check
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
+  
+  let user = session?.user ?? null;
+
+  if (!user) {
+    const {
+      data: { user: fetchedUser },
+    } = await supabase.auth.getUser();
+    user = fetchedUser;
+  }
 
   if (!user) {
     return { status: "unauthenticated", session: null };
   }
-
-  const sessionResult = await supabase.auth.getSession();
-  const session = sessionResult.data.session;
 
   const [{ data: membership }, { data: profile }] = await Promise.all([
     supabase

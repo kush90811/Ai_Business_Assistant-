@@ -619,7 +619,12 @@ export function LeadsClient({ session }: LeadsClientProps) {
 
                 {/* Column Cards Container */}
                 <div className="flex-1 space-y-3.5 overflow-y-auto pr-0.5">
-                  {columnLeads.length === 0 ? (
+                  {loading ? (
+                    <div className="space-y-3 animate-pulse">
+                      <div className="h-28 rounded-xl bg-white/5 border border-white/5" />
+                      <div className="h-28 rounded-xl bg-white/5 border border-white/5" />
+                    </div>
+                  ) : columnLeads.length === 0 ? (
                     <div className={`h-40 border border-dashed rounded-xl flex flex-col items-center justify-center p-4 text-center ${
                       isTargetDrop ? "border-indigo-500/50 bg-indigo-500/10" : "border-white/10 bg-white/[0.01]"
                     }`}>
