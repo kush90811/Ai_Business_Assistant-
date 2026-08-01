@@ -1,16 +1,26 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { VisitorProfile, QUALIFICATION_FIELDS } from "./types";
+
+type LeadRow = {
+  id?: string;
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  session_id?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
 
 export class MemoryEngine {
   /**
    * Fetches the visitor profile (lead row) from the database using visitorId or sessionId.
    */
   public static async getVisitorProfile(
-    supabase: any,
+    supabase: SupabaseClient,
     clientId: string,
     visitorId?: string,
     sessionId?: string
-  ): Promise<any | null> {
-    let existingLead: any = null;
+  ): Promise<LeadRow | null> {
+    let existingLead: LeadRow | null = null;
 
     if (visitorId) {
       const { data: sessions } = await supabase
@@ -20,7 +30,7 @@ export class MemoryEngine {
         .eq("client_id", clientId);
 
       if (sessions && sessions.length > 0) {
-        const sessionIds = sessions.map((s: any) => s.id);
+        const sessionIds = sessions.map((s: { id: string }) => s.id);
         const { data: leadsByVisitor } = await supabase
           .from("leads")
           .select("*")
@@ -53,7 +63,7 @@ export class MemoryEngine {
   /**
    * Converts the DB lead row into a structured VisitorProfile object.
    */
-  public static mapToVisitorProfile(lead: any): VisitorProfile {
+  public static mapToVisitorProfile(lead: LeadRow | null): VisitorProfile {
     if (!lead) {
       return {
         name: null,
@@ -74,7 +84,7 @@ export class MemoryEngine {
       };
     }
 
-    const meta = lead.metadata || {};
+    const meta = (lead.metadata as Record<string, string | null>) || {};
     return {
       id: lead.id,
       name: lead.name || null,
@@ -123,7 +133,7 @@ export class MemoryEngine {
    * ensuring that deleted visitor data doesn't leak stale memories into the LLM.
    */
   public static async getBackgroundContext(
-    supabase: any,
+    supabase: SupabaseClient,
     clientId: string,
     visitorId?: string,
     currentSessionId?: string
@@ -138,7 +148,7 @@ export class MemoryEngine {
       .neq("id", currentSessionId || "");
 
     if (otherSessions && otherSessions.length > 0) {
-      const otherSessionIds = otherSessions.map((s: any) => s.id);
+      const otherSessionIds = otherSessions.map((s: { id: string }) => s.id);
 
       // Coherence check: only load history if at least one lead still exists
       // for these sessions. If the admin deleted all leads, treat as no history.

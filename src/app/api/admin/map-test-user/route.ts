@@ -46,9 +46,10 @@ export async function GET() {
     `, [clientId, userId]);
 
     return NextResponse.json({ success: true, message: "User mapped successfully to client_admin!" });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[Test User Map Error] Failed:", err);
-    return NextResponse.json({ success: false, error: err.message || String(err) }, { status: 200 });
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ success: false, error: errMsg }, { status: 200 });
   } finally {
     await pgClient.end();
   }

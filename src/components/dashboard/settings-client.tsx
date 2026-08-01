@@ -10,8 +10,7 @@ import {
   User, 
   Sliders, 
   ArrowRight,
-  Globe,
-  Mail
+  Globe
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,8 +40,6 @@ export function SettingsClient({ session }: SettingsClientProps) {
   // Settings Form States
   // 1. Company Profile
   const [companyName, setCompanyName] = useState("Acme Corp");
-  const [websiteUrl, setWebsiteUrl] = useState("https://acme.co");
-  const [supportEmail, setSupportEmail] = useState("support@acme.co");
   const [industry, setIndustry] = useState("SaaS & Tech");
 
   // New Business Profile States
@@ -130,9 +127,10 @@ export function SettingsClient({ session }: SettingsClientProps) {
       }
 
       triggerToast("Logo uploaded and saved successfully!");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[Logo Upload Error] Failed to upload logo:", err);
-      triggerToast(`Failed to upload logo: ${err.message || String(err)}`);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      triggerToast(`Failed to upload logo: ${errMsg}`);
     } finally {
       setIsUploadingLogo(false);
     }
@@ -267,9 +265,10 @@ export function SettingsClient({ session }: SettingsClientProps) {
       }
 
       triggerToast("Configuration settings updated successfully!");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[Settings] Error saving configuration:", err);
-      triggerToast(`Error saving settings: ${err.message || String(err)}`);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      triggerToast(`Error saving settings: ${errMsg}`);
     } finally {
       setIsSaving(false);
     }

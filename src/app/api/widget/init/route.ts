@@ -75,7 +75,7 @@ export async function POST(request: Request) {
           .order("created_at", { ascending: true });
 
         if (!messagesError && messages) {
-          history = messages.map((msg: any) => ({
+          history = messages.map((msg: { id: string; role: string; content: string; created_at: string }) => ({
             id: msg.id,
             role: msg.role,
             content: msg.content,
@@ -155,10 +155,11 @@ export async function POST(request: Request) {
         }
         : null,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("[Widget Init Error] Failed to initialize widget:", error);
+    const errMsg = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: `Internal Server Error: ${error.message || String(error)}` },
+      { error: `Internal Server Error: ${errMsg}` },
       { status: 500 }
     );
   }

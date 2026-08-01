@@ -6,7 +6,7 @@ import { SalesEngine } from "./sales-engine";
 import { SupportEngine } from "./support-engine";
 import { RecommendationEngine } from "./recommendation-engine";
 import { StrategyEngine } from "./strategy-engine";
-import { VisitorProfile, AssistantMode, UserIntent, ConversationStage, StageMetadata } from "./types";
+import { AssistantMode, UserIntent, ConversationStage, VisitorProfile } from "./types";
 
 export interface OrchestratorParams {
   message: string;
@@ -49,28 +49,28 @@ export class AssistantOrchestrator {
     const currentStage = (sessionData?.metadata?.currentStage || "greeting") as ConversationStage;
 
     // Load Session Chat History early for combined analysis context
-    const { data: history, error: historyError } = await supabase
+    const { data: history } = await supabase
       .from("chat_messages")
       .select("role, content")
       .eq("session_id", sessionId)
       .order("created_at", { ascending: true })
       .limit(50);
 
-    const messageHistory = (history || []).map((m: any) => ({
-      role: m.role,
+    const messageHistory = (history || []).map((m: { role: string; content: string }) => ({
+      role: m.role as "user" | "assistant" | "system",
       content: m.content,
     }));
 
     // 3. Process Pending Confirmation if any exists
     if (existingLead && existingLead.metadata?.pending_confirmation) {
-      const pending = existingLead.metadata.pending_confirmation;
+      const pending = existingLead.metadata.pending_confirmation as { field: string; value: string; original?: string };
       const classification = SalesEngine.classifyConfirmation(message);
 
       console.log(`[Orchestrator] Found pending confirmation for '${pending.field}'. Response classified as: ${classification}`);
 
       if (classification === "yes") {
-        const updates: any = {};
-        const newMetadata = { ...existingLead.metadata };
+        const updates: Record<string, unknown> = {};
+        const newMetadata = { ...(existingLead.metadata as Record<string, unknown>) };
         delete newMetadata.pending_confirmation;
 
         if (["name", "email", "phone"].includes(pending.field)) {
@@ -145,7 +145,7 @@ export class AssistantOrchestrator {
     //    Falls back to LLM analyzeInput() if there is any ambiguity.
     const quickResult = AssistantOrchestrator.quickAnalyze(message);
 
-    let analysis: { intent: UserIntent; entities: any };
+    let analysis: { intent: UserIntent; entities: Partial<VisitorProfile> };
     if (quickResult.confident) {
       console.log(`[Orchestrator] Fast-path matched: intent=${quickResult.intent}, skipping LLM analysis.`);
       analysis = { intent: quickResult.intent, entities: quickResult.entities };
@@ -305,12 +305,14 @@ export class AssistantOrchestrator {
         }
 
         // Refresh local profile reference
-        const { data: refreshedLead } = await supabase
-          .from("leads")
-          .select("*")
-          .eq("id", existingLead.id)
-          .single();
-        profile = MemoryEngine.mapToVisitorProfile(refreshedLead);
+        if (existingLead?.id) {
+          const { data: refreshedLead } = await supabase
+            .from("leads")
+            .select("*")
+            .eq("id", existingLead.id)
+            .single();
+          profile = MemoryEngine.mapToVisitorProfile(refreshedLead);
+        }
       }
     }
 
@@ -348,7 +350,7 @@ export class AssistantOrchestrator {
       });
 
       if (!matchError && chunks && chunks.length > 0) {
-        ragContext = chunks.map((c: any) => c.chunk_text).join("\n\n");
+        ragContext = chunks.map((c: { chunk_text: string }) => c.chunk_text).join("\n\n");
       }
     } catch (err) {
       console.warn("[Orchestrator] ⚠️ RAG CONTEXT UNAVAILABLE: Vector search failed. The assistant will respond WITHOUT knowledge base context for this message. Error:", err);
@@ -479,7 +481,7 @@ export class AssistantOrchestrator {
   private static async analyzeInput(
     message: string,
     history: { role: string; content: string }[]
-  ): Promise<{ intent: UserIntent; entities: any }> {
+  ): Promise<{ intent: UserIntent; entities: Partial<VisitorProfile> }> {
     const recentHistory = history.slice(-5);
     const formattedHistory = recentHistory
       .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
@@ -587,11 +589,10 @@ Respond with a single JSON object matching this schema (no markdown formatting, 
    */
   private static quickAnalyze(message: string): {
     intent: UserIntent;
-    entities: any;
+    entities: Partial<VisitorProfile>;
     confident: boolean;
   } {
     const text = message.trim();
-    const lower = text.toLowerCase();
     const wordCount = text.split(/\s+/).length;
 
     const emptyEntities = {

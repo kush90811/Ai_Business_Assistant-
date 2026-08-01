@@ -329,7 +329,6 @@ Good response: "No worries — let's get that sorted! Could you tell me which of
   }): string {
     const {
       brandName,
-      mode,
       stageMetadata,
       memoryContext,
       backgroundContext,

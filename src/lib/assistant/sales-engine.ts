@@ -143,11 +143,13 @@ Example JSON output:
   /**
    * Helper to retrieve value from existing lead structure.
    */
-  public static getLeadFieldValue(lead: any, field: string): string | null {
+  public static getLeadFieldValue(lead: Record<string, unknown> | null, field: string): string | null {
+    if (!lead) return null;
     if (["name", "email", "phone"].includes(field)) {
-      return lead[field] || null;
+      return (lead[field] as string) || null;
     }
-    return lead.metadata?.[field] || null;
+    const meta = (lead.metadata as Record<string, string | null>) || null;
+    return meta?.[field] || null;
   }
 
   /**
@@ -173,14 +175,14 @@ Example JSON output:
    * Returns updates object, or conflict details if a conflict is found.
    */
   public static evaluateUpdates(
-    existingLead: any,
+    existingLead: Record<string, unknown> | null,
     extracted: Partial<VisitorProfile>
   ): {
-    updates: any;
+    updates: Record<string, unknown>;
     conflict: PendingConfirmation | null;
   } {
-    const updates: any = {};
-    const newMetadata = { ...(existingLead?.metadata || {}) };
+    const updates: Record<string, unknown> = {};
+    const newMetadata = { ...((existingLead?.metadata as Record<string, unknown>) || {}) };
     let metadataChanged = false;
     let conflict: PendingConfirmation | null = null;
 
@@ -203,7 +205,7 @@ Example JSON output:
     ];
 
     for (const field of fieldsToCheck) {
-      const newValue = (extracted as any)[field];
+      const newValue = (extracted as Record<string, unknown>)[field];
       if (newValue === null || newValue === undefined || String(newValue).trim() === "") continue;
 
       const existingValue = this.getLeadFieldValue(existingLead || {}, field);
@@ -222,7 +224,7 @@ Example JSON output:
       } else if (String(existingValue).trim().toLowerCase() !== String(newValue).trim().toLowerCase() && !conflict) {
         conflict = {
           field,
-          value: newValue,
+          value: String(newValue),
           original: existingValue,
         };
       }

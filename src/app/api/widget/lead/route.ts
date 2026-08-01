@@ -130,7 +130,7 @@ export async function POST(request: Request) {
 
     console.log("[API /api/widget/lead] Final response status: 200");
     return NextResponse.json({ success: true, leadId });
-  } catch (error: any) {
+  } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error("[API /api/widget/lead] Error occurred:", errMsg);
     return NextResponse.json({ error: `Internal Server Error: ${errMsg}` }, { status: 500 });

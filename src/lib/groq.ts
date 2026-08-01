@@ -93,7 +93,7 @@ function getTestMockResponse(messages: ChatMessage[]): string {
 
   // 1. Combined analyzeInput mock (intent + entity extraction in one call)
   if (systemMsg.includes("high-performance analysis engine")) {
-    const result: any = {
+    const result: { intent: string; entities: Record<string, string | null> } = {
       intent: "general_question",
       entities: {
         name: null, email: null, phone: null, company: null,
@@ -195,16 +195,18 @@ export async function getGroqChatCompletion(
     try {
       console.log(`[LLM Call] Attempting primary LLM (${primaryIsGroq ? "Groq" : "OpenAI"}) model: ${primaryModel}`);
       return await executeCompletionRequest(primaryUrl, primaryKey, primaryModel, messages, options);
-    } catch (primaryError: any) {
-      console.error(`[LLM Call Error] Primary LLM failed: ${primaryError.message || String(primaryError)}`);
+    } catch (primaryError: unknown) {
+      const pMsg = primaryError instanceof Error ? primaryError.message : String(primaryError);
+      console.error(`[LLM Call Error] Primary LLM failed: ${pMsg}`);
       
       // 2. Attempt fallback if configured
       if (hasFallback && fallbackKey) {
         try {
           console.log(`[LLM Call Fallback] Attempting fallback LLM (${primaryIsGroq ? "OpenAI" : "Groq"}) model: ${fallbackModel}`);
           return await executeCompletionRequest(fallbackUrl, fallbackKey, fallbackModel, messages, options);
-        } catch (fallbackError: any) {
-          console.error(`[LLM Call Error] Fallback LLM failed: ${fallbackError.message || String(fallbackError)}`);
+        } catch (fallbackError: unknown) {
+          const fMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+          console.error(`[LLM Call Error] Fallback LLM failed: ${fMsg}`);
         }
       }
     }

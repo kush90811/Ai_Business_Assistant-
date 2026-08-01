@@ -12,11 +12,7 @@ import {
   Kanban,
   Table,
   PhoneCall,
-  Mail,
-  UserCheck,
   Sparkles,
-  GripVertical,
-  CheckCircle2,
   Clock,
   Tag
 } from "lucide-react";
@@ -273,9 +269,10 @@ export function LeadsClient({ session }: LeadsClientProps) {
       setLeads(prev => prev.filter(l => l.id !== deleteLead.id));
       triggerToast(`Lead "${deleteLead.name}" deleted successfully.`);
       fetchLeads(true); // silent refresh
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to delete lead:", err);
-      triggerToast(`Error: ${err.message || "Failed to delete lead."}`);
+      const errMsg = err instanceof Error ? err.message : "Failed to delete lead.";
+      triggerToast(`Error: ${errMsg}`);
     } finally {
       setDeleteInProgress(false);
       setDeleteLead(null);
@@ -333,9 +330,10 @@ export function LeadsClient({ session }: LeadsClientProps) {
       setLeads([]);
       triggerToast("All leads deleted successfully.");
       fetchLeads(true); // silent refresh
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to delete all leads:", err);
-      triggerToast(`Error: ${err.message || "Failed to delete all leads."}`);
+      const errMsg = err instanceof Error ? err.message : "Failed to delete all leads.";
+      triggerToast(`Error: ${errMsg}`);
     } finally {
       setDeleteInProgress(false);
       setDeleteAllConfirm(false);
