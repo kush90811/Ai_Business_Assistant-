@@ -484,7 +484,7 @@ export function LeadsClient({ session }: LeadsClientProps) {
           <h1 className="text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
             Leads Pipeline CRM
             <span className="text-xs font-semibold font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full px-3 py-0.5">
-              Odoo Pipeline Active
+              AI Pipeline Active
             </span>
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
